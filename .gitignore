@@ -1,0 +1,6 @@
+/bin/
+/dist/
+/app/src-tauri/binaries/
+/app/src-tauri/target/
+/app/node_modules/
+/app/dist/

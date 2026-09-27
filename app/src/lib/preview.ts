@@ -1,0 +1,98 @@
+// Preview mode: in a plain browser (outside the Tauri app) calport commands
+// are answered from sample data, so the UI can be designed and checked with
+// `pnpm dev`. It never runs anything. Add ?preview=new to start as a first-run
+// user with no boxes.
+
+const firstRun = new URLSearchParams(window.location.search).get("preview") === "new";
+const now = Date.now();
+const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
+
+const status = {
+  boxes: firstRun
+    ? []
+    : [
+        { name: "devl", address: "100.101.102.103:7443", network: "personal", fingerprint: "q7mzl2h4d8xk", state: "online", latency_ms: 48, since: ago(90) },
+        { name: "dev-alex", address: "100.64.12.7:7443", fingerprint: "k3tqp9shd2mzab1c0x", state: "offline", error: "dial tcp 100.64.12.7:7443: i/o timeout", since: ago(12) },
+      ],
+  forwards: [{ id: "ca89419c", box: "devl", local: 23000, remote: 3000, state: "listening" }],
+  routes: [{ pattern: "*.personal.cal.localhost", box: "devl", port: 18080 }],
+  proxy: { port: 1355, url_port: 1355 },
+};
+
+const fixtures: Record<string, unknown> = {
+  status,
+  networks: firstRun ? [] : [{ name: "personal", state: "Running", tailnet: "example.com", ips: ["100.64.0.10"] }],
+  "agent status": { installed: false, running: true },
+  locations: [
+    {
+      name: "cal",
+      path: "/home/alex/work/cal",
+      repo: true,
+      worktrees: [
+        { name: "cal", path: "/home/alex/work/cal", branch: "main", head: "5fdc8af8dd", main: true },
+        { name: "feat-billing-dash", path: "/home/alex/work/cal-feat-billing-dash", branch: "billing/4-customer-credit", head: "62d41c1302" },
+        { name: "fix-login", path: "/home/alex/orca/workspaces/cal/fix-login", branch: "alex/fix-login", head: "1bda8af513" },
+      ],
+      scripts: { setup: '"$HOME/.local/bin/cal-worktree" setup', archive: '"$HOME/.local/bin/cal-archive"', from: "orca" },
+    },
+    { name: "scratch", path: "/home/alex/scratch", repo: false, scripts: {} },
+  ],
+  ports: [
+    { port: 22, address: "0.0.0.0" },
+    { port: 3000, address: "::", pid: 2211, process: "next-server (v1", command: "next-server (v16.3.6)" },
+    { port: 3010, address: "::", pid: 2290, process: "next-server (v1", command: "next-server (v16.3.6)" },
+    { port: 5432, address: "127.0.0.1", pid: 901, process: "postgres", command: "postgres -D /var/lib/postgresql/16/main" },
+    { port: 6768, address: "0.0.0.0", pid: 1433, process: "orca", command: "orca serve --port 6768" },
+  ],
+  services: [
+    { location: "cal", worktree: "cal", path: "/home/alex/work/cal", port: 3000, process: "next-server (v16.3.6)", main: true },
+    { location: "cal", worktree: "fix-login", path: "/home/alex/orca/workspaces/cal/fix-login", port: 3010, process: "next-server (v16.3.6)" },
+  ],
+  info: { os: "linux", arch: "amd64", build: "33100c12520f", tools: ["orca", "herdr", "claude", "codex"] },
+  doctor: [
+    { area: "This computer", name: "starts at login", status: "ok", detail: "background agent installed" },
+    { area: "This computer", name: "agent", status: "ok", detail: "running" },
+    { area: "This computer", name: "local URLs", status: "ok", detail: "http://PORT.BOX.localhost:1355/" },
+    { area: "This computer", name: "short URLs", status: "info", detail: "URLs include :1355", fix: "calport setup port80" },
+    { area: "Boxes", name: "devl", status: "ok", detail: "online, 48ms" },
+    { area: "Boxes", name: "dev-alex", status: "fail", detail: "not answering", fix: "calport doctor dev-alex" },
+    { area: "Tools", name: "orca", status: "ok", detail: "/usr/local/bin/orca" },
+  ],
+  "doctor box": [
+    { area: "calportd", name: "service", status: "ok", detail: "calportd.service, starts at boot" },
+    { area: "calportd", name: "listening", status: "ok", detail: "100.101.102.103:7443 (tailnet only)" },
+    { area: "Orca", name: "orca", status: "ok", detail: "/home/alex/.local/bin/orca" },
+    { area: "Orca", name: "cal scripts", status: "ok", detail: "setup and archive from Orca" },
+    { area: "Agents", name: "claude", status: "ok", detail: "/home/alex/.local/bin/claude" },
+    { area: "Agents", name: "hooks", status: "warn", detail: "Claude Code does not report to calportd", fix: "calportd integrations install claude" },
+  ],
+  shares: [{ id: "e46f6100", port: 3010, url: "https://shelter-mileage-simply-ranges.trycloudflare.com", started: ago(7), state: "live" }],
+};
+
+function key(args: string[]): string {
+  if (args[0] === "agent") return "agent status";
+  if (args[0] === "doctor" && args[1] !== "--json") return "doctor box";
+  return args[0];
+}
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export async function previewRun(args: string[]): Promise<string> {
+  await delay(120);
+  if (args[0] === "url") return `http://${args[2]}.${args[1]}.localhost:1355/\n`;
+  if (args[0] === "share") return JSON.stringify({ id: "b71c02aa", port: Number(args[2]), url: "https://quiet-river-demo.trycloudflare.com", started: new Date().toISOString(), state: "live" });
+  const k = key(args);
+  if (k in fixtures) return JSON.stringify(fixtures[k]);
+  return "{}";
+}
+
+export async function previewStream(args: string[], onLine: (line: string) => void): Promise<void> {
+  const lines =
+    args[0] === "network"
+      ? [`Sign in to the tailnet for "${args[2]}":`, "https://login.tailscale.com/a/preview", `Network ${args[2]} is connected to example.com.`]
+      : [`Checking ${args[2]}…`, "Installing calportd-linux-amd64 (8 MB)…", "Installed calportd.service; serving on 100.101.102.103:7443.", `Paired with ${args[2]} at 100.101.102.103:7443. SSH is no longer needed for this box.`];
+  for (const line of lines) {
+    await delay(700);
+    onLine(line);
+  }
+}
