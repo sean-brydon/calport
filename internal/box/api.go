@@ -1,6 +1,8 @@
 package box
 
 import (
+	"github.com/sean-brydon/calport/internal/kit"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,6 +42,8 @@ type Box struct {
 	DaemonChecks func() []doctor.Check
 	// LogDir holds the logs of lifecycle scripts.
 	LogDir string
+	// Kit installs the Cal.com worktree kit; nil where it cannot run.
+	Kit *kit.Installer
 }
 
 func (b *Box) own(path string) {
@@ -76,6 +80,8 @@ func (b *Box) Mount(s *wire.Server) {
 	route("GET /v1/shares", b.listShares)
 	route("POST /v1/shares", b.addShare)
 	route("DELETE /v1/shares/{id}", b.removeShare)
+	route("GET /v1/kit", b.kitStatus)
+	route("POST /v1/kit", b.installKit)
 	route("GET /v1/info", b.handleInfo)
 	route("GET /v1/doctor", b.handleDoctor)
 	route("POST /v1/upgrade", b.handleUpgrade)
@@ -224,8 +230,9 @@ func (b *Box) addWorktree(w http.ResponseWriter, r *http.Request) error {
 	b.publish(r, "worktree.created", map[string]any{
 		"location": location, "name": wt.Name, "path": wt.Path, "branch": wt.Branch, "provider": provider,
 	})
-	// Orca runs its own setup script for worktrees it creates.
-	if loc, err := b.Locations.Get(r.Context(), location); err == nil && provider != "orca" && loc.Scripts.Setup != "" {
+	// Orca runs its own setup script for worktrees it creates; calport runs
+	// the location's when Orca has none.
+	if loc, err := b.Locations.Get(r.Context(), location); err == nil && loc.Scripts.Setup != "" && (provider != "orca" || loc.Scripts.From != "orca") {
 		go b.lifecycle(origin(r), "setup", loc, wt.Path, wt.Name, loc.Scripts.Setup, nil)
 	}
 	writeJSON(w, wt)
@@ -264,7 +271,7 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 	}
 	// A worktree with an archive script is torn down in the background: the
 	// script may take minutes, and removal only follows if it succeeds.
-	if !OrcaManaged(dir) && loc.Scripts.Archive != "" {
+	if (!OrcaManaged(dir) || loc.Scripts.From != "orca") && loc.Scripts.Archive != "" {
 		from := origin(r)
 		go b.lifecycle(from, "archive", loc, dir, name, loc.Scripts.Archive, func() error {
 			if err := b.Locations.RemoveWorktree(context.Background(), location, name, force); err != nil {

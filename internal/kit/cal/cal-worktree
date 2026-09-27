@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""Persistent Cal.com development worktrees, run as Orca (or calport) hooks.
+
+Installed by `calportd kit install cal`; config.json holds this box's paths.
+"""
+import fcntl, hashlib, json, os, pathlib, re, shutil, socket, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+BASE = pathlib.Path.home()/'.local/share/cal-worktrees'
+BASE.mkdir(parents=True, exist_ok=True, mode=0o700)
+ROUTES = BASE/'routes'
+ROUTES.mkdir(exist_ok=True, mode=0o700)
+CONFIG = json.loads((BASE/'config.json').read_text())
+NODE = CONFIG.get('node') or str(pathlib.Path.home()/'.local/bin/node')
+SCRIPT = str(BASE/'cal-worktree')
+ENV = dict(os.environ, PATH=str(BASE/'bin')+':'+str(pathlib.Path(NODE).parent)+':'+str(pathlib.Path.home()/'.local/bin')+':'+os.environ.get('PATH','/usr/bin:/bin'))
+
+ENV.update(YARN_NM_MODE='hardlinks-global', YARN_GLOBAL_FOLDER=str(BASE/'yarn-global'), FORCE_COLOR='1', CLICOLOR_FORCE='1', YARN_ENABLE_COLORS='true')
+ENV.pop('NO_COLOR',None)
+TIMING_LOG = None
+
+def timed(label, action):
+    started=time.monotonic()
+    print(label+'...',flush=True)
+    if TIMING_LOG:
+        with TIMING_LOG.open('a') as log: print(label+'...',file=log,flush=True)
+    result=action()
+    message=f'{label}: {time.monotonic()-started:.1f}s'
+    print(message,flush=True)
+    if TIMING_LOG:
+        with TIMING_LOG.open('a') as log: print(message,file=log,flush=True)
+    return result
+
+def call(args, **kw):
+    return subprocess.run(args, check=True, env=ENV, **kw)
+def save(p, value):
+    tmp=p.with_suffix('.tmp'); tmp.write_text(json.dumps(value,indent=2)+'\n'); tmp.chmod(0o600); tmp.replace(p)
+def read_env(root):
+    return json.loads(subprocess.check_output([NODE,str(BASE/'database.cjs'),'env',str(root)],env=ENV))
+def unit(key): return 'cal-worktree-'+key+'.service'
+def context():
+    root=pathlib.Path(os.environ.get('ORCA_ROOT_PATH',CONFIG['root'])).resolve()
+    work=pathlib.Path(os.environ.get('ORCA_WORKTREE_PATH',os.getcwd())).resolve()
+    if root!=pathlib.Path(CONFIG['root']).resolve(): raise RuntimeError('Unexpected Orca repository root')
+    if work==root: raise RuntimeError('Use this hook on a worktree, not the main checkout')
+    common=subprocess.check_output(['git','-C',str(work),'rev-parse','--path-format=absolute','--git-common-dir'],text=True).strip()
+    expected=subprocess.check_output(['git','-C',str(root),'rev-parse','--path-format=absolute','--git-common-dir'],text=True).strip()
+    if pathlib.Path(common).resolve()!=pathlib.Path(expected).resolve(): raise RuntimeError('Worktree belongs to another repository')
+    return root,work,hashlib.sha256(str(work).encode()).hexdigest()[:12]
+def load(key): return json.loads((ROUTES/(key+'.json')).read_text())
+def set_active(key, active):
+    record=load(key);record['active']=active;save(ROUTES/(key+'.json'),record);return record
+
+def signature(work):
+    # Conservative: any tracked edit, new non-ignored file, env or runtime change
+    # invalidates reuse. Git-generated and dependency outputs are checked separately.
+    h=hashlib.sha256()
+    for args in [['rev-parse','HEAD'],['diff','HEAD','--binary','--no-ext-diff']]:
+        h.update(subprocess.check_output(['git','-C',str(work),*args]))
+    names=subprocess.check_output(['git','-C',str(work),'ls-files','--others','--exclude-standard','-z']).split(b'\0')
+    files=[work/os.fsdecode(n) for n in names if n]
+    files += [pathlib.Path(SCRIPT),BASE/'database.cjs']
+    h.update(subprocess.check_output([NODE,str(BASE/'database.cjs'),'env-fingerprint',str(work)]))
+    for p in sorted(set(files)):
+        h.update(str(p.relative_to(work) if p.is_relative_to(work) else p).encode())
+        if p.is_file():
+            with p.open('rb') as f:
+                while chunk:=f.read(1024*1024): h.update(chunk)
+    h.update(subprocess.check_output([NODE,'--version']))
+    return h.hexdigest()
+
+def outputs_present(work):
+    return all((work/p).exists() for p in [
+        'node_modules/.yarn-state.yml','.yarn/install-state.gz',
+        'node_modules/next/dist/bin/next',
+        'packages/embeds/embed-react/dist/Cal.es.js',
+        'apps/web/public/embed/embed.js',
+        'packages/infra/adapters/database/prisma/generated',
+    ])
+
+def healthy(record):
+    req=urllib.request.Request('http://127.0.0.1:'+str(record['port'])+'/auth/login',headers={'Host':record['host']})
+    try:
+        with urllib.request.urlopen(req,timeout=2) as response: return response.status==200
+    except (OSError,urllib.error.URLError): return False
+
+def open_logs_terminal(work):
+    if not CONFIG.get('orca'): return
+    try:
+        subprocess.run(['python3',str(BASE/'orca-logs.py'),str(work)],env=ENV,timeout=55,check=False)
+    except (OSError,subprocess.TimeoutExpired) as error:
+        print('Could not open Cal logs terminal: '+str(error),flush=True)
+
+def setup():
+    global TIMING_LOG
+    started=time.monotonic()
+    root,work,key=context()
+    with (BASE/(key+'.lock')).open('w') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        cancelled=BASE/(key+'.cancelled')
+        cancelled.unlink(missing_ok=True)
+        def check_cancelled():
+            if cancelled.exists(): raise RuntimeError('Setup cancelled by archive')
+        with (BASE/'registry.lock').open('w') as registry:
+            fcntl.flock(registry,fcntl.LOCK_EX)
+            file=ROUTES/(key+'.json')
+            if file.exists(): record=load(key)
+            else:
+                name=os.environ.get('ORCA_WORKSPACE_NAME') or subprocess.check_output(['git','-C',str(work),'branch','--show-current'],text=True).strip() or work.name
+                slug=re.sub('[^a-z0-9]+','-',name.lower()).strip('-')[:42].rstrip('-') or 'branch'
+                host=f'{slug}-{key[:6]}.{CONFIG["host"]}.cal.localhost'
+                taken={json.loads(p.read_text())['port'] for p in ROUTES.glob('*.json')}
+                port=None
+                for candidate in range(3100,4100):
+                    if candidate in taken: continue
+                    with socket.socket() as s:
+                        try: s.bind(('127.0.0.1',candidate))
+                        except OSError: continue
+                    port=candidate;break
+                if port is None: raise RuntimeError('No available development port')
+                record=dict(host=host,port=port,path=str(work),root=str(root),database='calwt_'+key,active=False,seeded=False)
+                save(file,record)
+        logpath=BASE/(key+'-setup.log')
+        TIMING_LOG=logpath
+        with logpath.open('a') as log:
+            # Preserve worktree-specific settings on subsequent runs.
+            envpath=work/'.env'
+            if envpath.is_symlink():
+                previous=envpath.read_text();envpath.unlink();envpath.write_text(previous)
+            if not envpath.exists(): shutil.copy2(root/'.env',envpath)
+            if (root/'.env.appStore').exists() and not (work/'.env.appStore').exists(): shutil.copy2(root/'.env.appStore',work/'.env.appStore')
+            values=read_env(work)
+            source=read_env(root)
+            origin='http://'+record['host']
+            updates={}
+            for k,v in values.items():
+                try: u=urllib.parse.urlsplit(v)
+                except ValueError: continue
+                if u.scheme in ('http','https') and u.hostname in ('localhost','127.0.0.1') and u.port==3000:
+                    updates[k]=urllib.parse.urlunsplit(('http',record['host'],u.path,u.query,u.fragment))
+            for k in ('DATABASE_URL','DATABASE_DIRECT_URL'):
+                u=urllib.parse.urlsplit(source.get(k) or source['DATABASE_URL'])
+                if u.hostname not in ('localhost','127.0.0.1','::1'): raise RuntimeError('Expected local development database URLs')
+                params=urllib.parse.parse_qsl(u.query,keep_blank_values=True)
+                params=[(k,v) for k,v in params if k!='schema']
+                updates[k]=urllib.parse.urlunsplit((u.scheme,u.netloc,'/'+record['database'],urllib.parse.urlencode(params),''))
+            updates.update(NEXT_PUBLIC_WEBAPP_URL=origin,PORT=str(record['port']))
+            updates['NEXTAUTH_URL']=origin+'/api/auth'
+            updates['NEXTAUTH_URL_INTERNAL']='http://127.0.0.1:'+str(record['port'])+'/api/auth'
+            text=envpath.read_text()
+            for k,v in updates.items():
+                line=k+'='+json.dumps(v)
+                if re.search(r'^'+re.escape(k)+r'=.*$',text,re.M): text=re.sub(r'^'+re.escape(k)+r'=.*$',lambda _:line,text,flags=re.M)
+                else: text+='\n'+line+'\n'
+            envpath.write_text(text);envpath.chmod(0o600)
+            if not (work/'node_modules').exists() and shutil.disk_usage(work).free < 6*1024**3:
+                raise RuntimeError('At least 6 GiB free disk space is required for a fresh worktree')
+            print('Preparing '+origin,flush=True)
+            print('Logs: '+origin+'/__worktree/logs',flush=True)
+            print('Studio: '+origin+'/__worktree/studio',flush=True)
+            print('App port: '+str(record['port']),flush=True)
+            prepared_signature=signature(work)
+            reuse=('--force' not in sys.argv and record.get('ready_signature')==prepared_signature and outputs_present(work))
+            database = timed('Prepare database',lambda: json.loads(subprocess.check_output(
+                [NODE,str(BASE/'database.cjs'),'create',str(root),record['database'],str(work)],env=ENV,stderr=log)))
+            reuse=reuse and database.get('existing',False)
+            if not database.get('existing'):
+                record['seeded']=False
+            if database.get('cloned'):
+                record['seeded']=True;save(file,record)
+                print('Database snapshot ready; development seed already included',flush=True)
+            elif database.get('reason'):
+                print(database['reason'],flush=True)
+            if not reuse:
+                runenv=dict(ENV,YARN_CACHE_FOLDER=str(root/'.yarn/cache'))
+                timed('Install dependencies',lambda: subprocess.run(['yarn','install','--immutable'],cwd=work,env=runenv,check=True,stdout=log,stderr=log))
+                check_cancelled()
+                timed('Apply migrations',lambda: call(['yarn','prisma','migrate','deploy'],cwd=work,stdout=log,stderr=log))
+                check_cancelled()
+                if not record['seeded']:
+                    timed('Seed development data',lambda: call(['yarn','workspace','@calcom/database','seed-basic'],cwd=work,stdout=log,stderr=log))
+                    record['seeded']=True;save(file,record)
+            else:
+                print('Checkout unchanged; dependencies and migrations already prepared',flush=True)
+            if reuse and record.get('active') and healthy(record):
+                print(f'READY: {origin} (already running; {time.monotonic()-started:.1f}s)',flush=True)
+                open_logs_terminal(work)
+                return
+        check_cancelled()
+        service=pathlib.Path.home()/'.config/systemd/user'/unit(key)
+        service.parent.mkdir(parents=True,exist_ok=True)
+        service.write_text('[Unit]\nDescription=Cal.com worktree '+key+'\nAfter=network.target\n[Service]\nExecStart='+SCRIPT+' run '+key+'\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=30\nKillMode=control-group\nUMask=0077\n[Install]\nWantedBy=default.target\n')
+        call(['systemctl','--user','daemon-reload'])
+        call(['systemctl','--user','enable',unit(key)],stdout=subprocess.DEVNULL)
+        set_active(key,True)
+        boot_started=time.monotonic()
+        call(['systemctl','--user','restart',unit(key)])
+        deadline=time.monotonic()+240
+        while time.monotonic()<deadline:
+            check_cancelled()
+            req=urllib.request.Request('http://127.0.0.1:'+str(record['port'])+'/auth/login',headers={'Host':record['host']})
+            try:
+                with urllib.request.urlopen(req,timeout=10) as response:
+                    if response.status==200:
+                        record=load(key)
+                        if prepared_signature==signature(work): record['ready_signature']=prepared_signature
+                        else: record.pop('ready_signature',None)
+                        save(file,record)
+                        message=f'App startup + first page: {time.monotonic()-boot_started:.1f}s; total setup: {time.monotonic()-started:.1f}s'
+                        print(message,flush=True)
+                        with logpath.open('a') as out: print(message,file=out)
+                        print('READY: '+origin,flush=True)
+                        open_logs_terminal(work)
+                        return
+            except (OSError,urllib.error.URLError): pass
+            time.sleep(0.25)
+        raise RuntimeError('Server did not become ready; inspect journalctl --user -u '+unit(key))
+
+def archive(key=None):
+    if key is None: _,_,key=context()
+    (BASE/(key+'.cancelled')).touch()
+    subprocess.run(['systemctl','--user','stop','cal-studio-'+key+'.service'],env=ENV,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    subprocess.run(['systemctl','--user','stop',unit(key)],env=ENV,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    with (BASE/(key+'.lock')).open('w') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        if not (ROUTES/(key+'.json')).exists(): return
+        record=set_active(key,False)
+        call(['systemctl','--user','disable','--now',unit(key)],stdout=subprocess.DEVNULL)
+        print('Stopped '+record['host']+'; database and URL retained for reopening.')
+
+def studio(key):
+    if not re.fullmatch('[a-f0-9]{12}',key): raise RuntimeError('Invalid worktree')
+    with (BASE/(key+'.lock')).open('w') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        r=load(key)
+        if not r['active'] or not pathlib.Path(r['path']).is_dir(): raise RuntimeError('Worktree is stopped')
+        if not r.get('studio_port'):
+            with (BASE/'registry.lock').open('w') as registry:
+                fcntl.flock(registry,fcntl.LOCK_EX)
+                taken={json.loads(p.read_text()).get('studio_port') for p in ROUTES.glob('*.json')}
+                for port in range(6100,7100):
+                    if port in taken: continue
+                    with socket.socket() as sock:
+                        try: sock.bind(('127.0.0.1',port))
+                        except OSError: continue
+                    r['studio_port']=port;save(ROUTES/(key+'.json'),r);break
+                else: raise RuntimeError('No Studio port available')
+        service_name='cal-studio-'+key+'.service'
+        service=pathlib.Path.home()/'.config/systemd/user'/service_name
+        service.write_text('[Unit]\nDescription=Prisma Studio '+key+'\nPartOf='+unit(key)+'\n[Service]\nExecStart='+SCRIPT+' studio-run '+key+'\nKillMode=control-group\nTimeoutStopSec=15\nUMask=0077\n')
+        call(['systemctl','--user','daemon-reload'],stdout=subprocess.DEVNULL)
+        call(['systemctl','--user','start',service_name],stdout=subprocess.DEVNULL)
+        deadline=time.monotonic()+25
+        while time.monotonic()<deadline:
+            try:
+                with urllib.request.urlopen('http://127.0.0.1:'+str(r['studio_port']),timeout=1) as response:
+                    if response.status==200: print(r['studio_port']);return
+            except (OSError,urllib.error.URLError): pass
+            time.sleep(.2)
+        raise RuntimeError('Studio did not start; inspect journalctl --user -u '+service_name)
+
+def studio_run(key):
+    r=load(key)
+    if not r['active']: return
+    work=pathlib.Path(r['path']);os.chdir(work)
+    env=dict(ENV,**read_env(work))
+    os.execvpe('yarn',['yarn','prisma','studio','--hostname','127.0.0.1','--port',str(r['studio_port']),'--browser','none'],env)
+
+def run(key):
+    r=load(key)
+    if not r['active'] or not pathlib.Path(r['path']).is_dir(): return
+    os.chdir(r['path'])
+    env=dict(ENV,**read_env(pathlib.Path(r['path'])))
+    env.update(FORCE_COLOR='1',CLICOLOR_FORCE='1',YARN_ENABLE_COLORS='true');env.pop('NO_COLOR',None)
+    env['PORT']=str(r['port']);env['NEXTAUTH_URL_INTERNAL']='http://127.0.0.1:'+str(r['port'])+'/api/auth';env['NODE_OPTIONS']='--max-old-space-size=4096'
+    work=pathlib.Path(r['path'])
+    web=json.loads((work/'apps/web/package.json').read_text())
+    standard_dev=web.get('scripts',{}).get('dev')=='turbo run copy-app-store-static && next dev --turbopack'
+    if standard_dev and r.get('ready_signature')==signature(work) and outputs_present(work) and (work/'apps/web/public/app-store').is_dir():
+        print('Reusing prepared startup tasks and this worktree’s Next.js cache',flush=True)
+        os.chdir(work/'apps/web')
+        os.execvpe(NODE,[NODE,str(work/'node_modules/next/dist/bin/next'),'dev','--turbopack','--port',str(r['port']),'--hostname','127.0.0.1'],env)
+    os.execvpe('yarn',['yarn','dev','--env-mode=loose','--','--port',str(r['port']),'--hostname','127.0.0.1'],env)
+
+try:
+    action=sys.argv[1] if len(sys.argv)>1 else 'status'
+    if action=='setup': setup()
+    elif action=='archive': archive()
+    elif action=='run': run(sys.argv[2])
+    elif action=='studio': studio(sys.argv[2])
+    elif action=='studio-run': studio_run(sys.argv[2])
+    elif action=='stop': archive(sys.argv[2])
+    elif action=='links':
+        _,_,key=context()
+        while True:
+            r=load(key);origin='http://'+r['host']
+            print('\033]0;Cal links\007',end='',flush=True)
+            print('\nApp ready' if r['active'] and healthy(r) else '\nApp starting or stopped',flush=True)
+            for label,value in [('Local URL',origin),('App port',str(r['port'])),('Live logs',origin+'/__worktree/logs'),('Prisma Studio',origin+'/__worktree/studio')]:
+                print(f'{label+":":<15}{value}',flush=True)
+            if not sys.stdin.isatty(): break
+            try: input('\nPress Enter to refresh these links. ')
+            except (EOFError,KeyboardInterrupt): break
+    elif action=='logs':
+        _,_,key=context()
+        r=load(key)
+        print('\033]0;Cal logs\007',end='',flush=True)
+        print('App: http://'+r['host']+'  (port '+str(r['port'])+')',flush=True)
+        print('Logs: http://'+r['host']+'/__worktree/logs',flush=True)
+        print('Studio: http://'+r['host']+'/__worktree/studio',flush=True)
+        os.execvp('python3',['python3',str(BASE/'color-logs.py'),'journalctl','--user','-u',unit(key),'-n','100','-f','--no-pager','--all'])
+    elif action=='setup-logs':
+        _,_,key=context()
+        os.execvp('python3',['python3',str(BASE/'color-logs.py'),'tail','-n','100','-F',str(BASE/(key+'-setup.log'))])
+    elif action=='status':
+        for p in sorted(ROUTES.glob('*.json')):
+            r=json.loads(p.read_text());print(('active' if r['active'] else 'archived')+' http://'+r['host']+' '+r['path'])
+    else: raise RuntimeError('Usage: cal-worktree setup|archive|status|logs|setup-logs')
+except Exception as e:
+    print('Cal worktree: '+str(e),file=sys.stderr);sys.exit(1)

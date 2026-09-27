@@ -49,9 +49,33 @@ export interface Location {
   name: string;
   path: string;
   repo: boolean;
+  cal?: boolean;
   worktrees?: Worktree[];
   scripts: Scripts;
 }
+
+export interface KitWorktree {
+  host: string;
+  path: string;
+  port: number;
+  active: boolean;
+}
+
+export interface KitStatus {
+  installed: boolean;
+  config: { host: string; root: string; orca?: string };
+  pattern?: string;
+  worktrees?: KitWorktree[];
+}
+
+export interface KitInstall {
+  kit: KitStatus & { notes?: string[]; hooks_from?: string };
+  routed: boolean;
+}
+
+// The hooks Orca runs for a Cal.com repository once the kit is installed.
+export const KIT_SETUP_HOOK = '"$HOME/.local/bin/cal-worktree" setup';
+export const KIT_ARCHIVE_HOOK = '"$HOME/.local/bin/cal-archive"';
 
 export interface Service {
   location: string;
@@ -229,6 +253,8 @@ export const calport = {
   removePort80: () => run(["setup", "port80", "--remove"]),
   doctor: (box?: string) => json<Check[]>(box ? ["doctor", box] : ["doctor"]),
   services: (box: string) => json<Service[]>(["services", box]),
+  kit: (box: string) => json<KitStatus>(["kit", box]),
+  installKit: (box: string, location: string) => json<KitInstall>(["kit", "install", `${box}/${location}`]),
   info: async (box: string) => JSON.parse(await run(["info", box])) as BoxInfo,
   importOrca: (box: string) => run(["location", "import", box, "orca"]),
   openWorktree: (box: string, location: string, worktree: string, tool: "orca" | "herdr", agent?: string) =>
@@ -263,6 +289,11 @@ export const calport = {
 // serviceURL mirrors calport's own: no port once the port 80 redirect is in.
 export function serviceURL(service: string | number, box: string, urlPort: number): string {
   return urlPort === 80 ? `http://${service}.${box}.localhost/` : `http://${service}.${box}.localhost:${urlPort}/`;
+}
+
+// kitURL is a Cal.com kit worktree's address, which its app redirects to.
+export function kitURL(host: string, urlPort: number): string {
+  return urlPort === 80 ? `http://${host}/` : `http://${host}:${urlPort}/`;
 }
 
 // worktreeURL is a worktree's own address: its dev server, named for it.

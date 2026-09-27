@@ -45,7 +45,8 @@ func (b *Box) Doctor(ctx context.Context) []doctor.Check {
 	if len(locs) == 0 {
 		checks = append(checks, doctor.Check{Area: "Locations", Name: "locations", Status: doctor.Info, Detail: "none yet", Fix: "calportd location add NAME ~/path/to/repo"})
 	}
-	return append(checks, doctor.OrcaChecks(ctx, "Orca", repos)...)
+	checks = append(checks, doctor.OrcaChecks(ctx, "Orca", repos)...)
+	return append(checks, b.kitChecks(ctx, locs)...)
 }
 
 func (b *Box) handleDoctor(w http.ResponseWriter, r *http.Request) error {

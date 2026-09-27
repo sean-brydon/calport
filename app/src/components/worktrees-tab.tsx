@@ -34,7 +34,18 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { toastManager } from "@/components/ui/toast";
 import { useLoad, usePoll } from "@/hooks/use-calport";
-import { calport, type Lifecycle, type Location, type Service, serviceURL, type Worktree, worktreeURL } from "@/lib/calport";
+import { CalKitPanel } from "@/components/cal-kit-panel";
+import {
+  calport,
+  type KitWorktree,
+  kitURL,
+  type Lifecycle,
+  type Location,
+  type Service,
+  serviceURL,
+  type Worktree,
+  worktreeURL,
+} from "@/lib/calport";
 
 interface WorktreesTabProps {
   box: string;
@@ -51,6 +62,7 @@ export function WorktreesTab({ box, urlPort, version, lifecycle }: WorktreesTabP
   const locations = useLoad(() => calport.locations(box), [box, version]);
   const services = useLoad(() => calport.services(box), [box, version]);
   const info = useLoad(() => calport.info(box), [box]);
+  const kit = useLoad(() => calport.kit(box), [box, version]);
   usePoll(services.reload, 10_000);
   const [adding, setAdding] = useState(false);
   const [creatingIn, setCreatingIn] = useState<Location>();
@@ -167,6 +179,14 @@ export function WorktreesTab({ box, urlPort, version, lifecycle }: WorktreesTabP
               </Menu>
             </CardAction>
           </CardHeader>
+          {loc.cal && kit.data && (
+            <CardPanel className="pb-3">
+              <CalKitPanel box={box} location={loc} kit={kit.data} hasOrca={hasOrca} onInstalled={() => {
+                kit.reload();
+                locations.reload();
+              }} />
+            </CardPanel>
+          )}
           {loc.repo && (
             <CardPanel className="flex flex-col divide-y">
               {(loc.worktrees ?? []).map((wt) => (
@@ -179,6 +199,7 @@ export function WorktreesTab({ box, urlPort, version, lifecycle }: WorktreesTabP
                   services={servicesFor(loc, wt)}
                   tools={tools}
                   lifecycle={lifecycle[`${box}:${wt.path}`]}
+                  kit={kit.data?.worktrees?.find((k) => k.path === wt.path)}
                   onRemoved={locations.reload}
                 />
               ))}
@@ -209,12 +230,15 @@ interface WorktreeRowProps {
   services: Service[];
   tools: string[];
   lifecycle?: Lifecycle;
+  kit?: KitWorktree;
   onRemoved: () => void;
 }
 
-function WorktreeRow({ box, loc, wt, urlPort, services, tools, lifecycle, onRemoved }: WorktreeRowProps) {
-  const running = services.length > 0;
-  const primary = worktreeURL(wt.name, loc.name, box, urlPort, wt.main);
+function WorktreeRow({ box, loc, wt, urlPort, services, tools, lifecycle, kit, onRemoved }: WorktreeRowProps) {
+  // A kit worktree's app redirects to its kit hostname, so link that one.
+  const running = services.length > 0 || kit?.active === true;
+  const primary = kit ? kitURL(kit.host, urlPort) : worktreeURL(wt.name, loc.name, box, urlPort, wt.main);
+  const others = kit ? services.filter((s) => s.port !== kit.port) : services.slice(1);
   const handoffs = tools.filter((t): t is "orca" | "herdr" => t === "orca" || t === "herdr");
   const agents = tools.filter((t) => t === "claude" || t === "codex");
 
@@ -252,7 +276,12 @@ function WorktreeRow({ box, loc, wt, urlPort, services, tools, lifecycle, onRemo
               <ExternalLinkIcon />
               {primary.replace(/^http:\/\//, "").replace(/\/$/, "")}
             </Button>
-            {services.slice(1).map((s) => (
+            {kit && (
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => openUrl(`${primary}__worktree/logs`)}>
+                Logs
+              </Button>
+            )}
+            {others.map((s) => (
               <Button key={s.port} size="sm" variant="ghost" className="h-6 px-2 font-mono text-xs" title={s.process} onClick={() => openUrl(serviceURL(s.port, box, urlPort))}>
                 :{s.port}
               </Button>

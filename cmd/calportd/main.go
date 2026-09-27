@@ -139,6 +139,8 @@ func run(args []string) error {
 			return c.Emit(context.Background(), e.Type, e.Data)
 		})
 		return nil
+	case "kit":
+		return runKit(b, args[1:])
 	case "integrations":
 		exe, err := os.Executable()
 		if err != nil {
@@ -224,6 +226,7 @@ func serve(b boxHome, args []string) error {
 		Watcher:      watcher,
 		DaemonChecks: func() []doctor.Check { return daemonChecks(b, ln.Addr().String()) },
 		LogDir:       filepath.Join(b.dir, "logs"),
+		Kit:          kitInstaller(exe),
 		Update: &box.SelfUpdate{
 			Executable:    exe,
 			Fingerprint:   id.Fingerprint().String(),

@@ -3,6 +3,8 @@
 package box
 
 import (
+	"github.com/sean-brydon/calport/internal/kit"
+
 	"bufio"
 	"bytes"
 	"context"
@@ -26,7 +28,9 @@ type Location struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	// Repo is true when Path is the root of a git repository.
-	Repo      bool       `json:"repo"`
+	Repo bool `json:"repo"`
+	// Cal is true for a Cal.com checkout, which the Cal.com kit can serve.
+	Cal       bool       `json:"cal,omitempty"`
 	Worktrees []Worktree `json:"worktrees,omitempty"`
 	// Scripts run when calport creates or removes worktrees here.
 	Scripts Scripts `json:"scripts"`
@@ -233,6 +237,7 @@ func describe(ctx context.Context, s savedLocation) Location {
 		return loc
 	}
 	loc.Repo = true
+	loc.Cal = kit.LooksLikeCal(s.Path)
 	loc.Worktrees = parseWorktrees(out, s.Path)
 	return loc
 }

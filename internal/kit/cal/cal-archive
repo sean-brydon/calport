@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Orca archive hook: stop the worktree's app, then cap build caches that
+# otherwise grow without bound on the box's disk.
+set -uo pipefail
+start=$(date +%s)
+kit="$HOME/.local/share/cal-worktrees"
+root=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root"])' "$kit/config.json")
+
+"$kit/cal-worktree" archive && status=0 || status=$?
+
+# Orca normally deletes the folder after archiving; clear the build output in
+# case it survives, so a kept folder doesn't hold gigabytes of .next.
+work=${ORCA_WORKTREE_PATH:-}
+if [ -n "$work" ] && [ "$work" != "$root" ] && [ -d "$work/apps/web/.next" ]; then
+  rm -rf "$work/apps/web/.next"
+  echo "Pruned $(basename "$work")/apps/web/.next"
+fi
+
+# Turborepo's cache lives in the main checkout and nothing evicts it. Clear it
+# past the cap; it rebuilds on demand.
+turbo="$root/.turbo"
+cap_mb=${CAL_TURBO_CAP_MB:-2048}
+if [ -d "$turbo" ]; then
+  size_mb=$(du -sm "$turbo" | cut -f1)
+  if [ "$size_mb" -gt "$cap_mb" ]; then
+    rm -rf "$turbo"
+    echo "Pruned main checkout .turbo (${size_mb}MB > ${cap_mb}MB cap)"
+  fi
+fi
+
+echo "Worktree archive took $(( $(date +%s) - start ))s (exit $status); disk $(df -h / | awk 'NR==2{print $5" used, "$4" free"}')"
+exit "$status"

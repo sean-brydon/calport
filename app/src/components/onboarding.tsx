@@ -183,6 +183,16 @@ function OrcaAndAgents({ onNext }: { onNext: () => void }) {
       </Card>
       <Card>
         <CardHeader>
+          <CardTitle>Cal.com worktrees</CardTitle>
+          <CardDescription>
+            On a box with a Cal.com checkout, Calport offers the Cal.com kit from the Worktrees tab: every worktree gets
+            its own port, database copy, .env and URL, and stops when archived. It asks before installing anything, and
+            shows the two hooks to paste into Orca's settings.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+      <Card>
+        <CardHeader>
           <CardTitle>Scripts without Orca</CardTitle>
           <CardDescription>
             Worktrees made with git or Herdr run the same scripts, with Orca's environment variables, so an Orca setup

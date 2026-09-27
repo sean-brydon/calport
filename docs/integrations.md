@@ -70,6 +70,37 @@ calport worktree new devl/cal/fix-login --provider herdr --herdr-session agents
 - **Herdr**: `herdr worktree create`, which also opens a workspace with a pane
   in the new worktree.
 
+### The Cal.com kit
+
+On a box with a Cal.com checkout, `calport kit install BOX/LOCATION` (or **Set
+up** on the location in the app) installs the Cal.com worktree kit. Each new
+worktree then gets its own port, a copy of the dev database, its own `.env`,
+and a URL like `http://fix-login-a1b2c3.devl.cal.localhost`; archiving stops it.
+
+What it installs, as your user, with nothing needing root:
+
+- the scripts in `~/.local/share/cal-worktrees`, embedded in calportd, and
+  `cal-worktree`, `cal-archive` and `cal-setup` links in `~/.local/bin` (a
+  script of the same name already there is kept as `NAME.calport-backup`);
+- `cal-worktree-proxy.service`, which is `calportd kit router`: it routes each
+  worktree hostname to its dev server on `127.0.0.1:18080`, and serves
+  `/__worktree/logs` and Prisma Studio next to it;
+- with Orca, `cal-worktree-lifecycle.service`, which stops worktrees Orca
+  archives and sets up ones it restores;
+- on the laptop, a route for the kit's hostnames to that router.
+
+Worktrees calport creates run the hooks itself. For ones made in Orca's app,
+set the repository's **Worktree Hooks** in Orca's settings:
+
+```sh
+"$HOME/.local/bin/cal-worktree" setup      # Setup
+"$HOME/.local/bin/cal-archive"             # Archive
+```
+
+with **Run by default** and **Wait for setup to complete before starting
+agent**. `calport doctor BOX` says when they are missing. Reinstalling keeps a
+box's URL label, so URLs in use keep working.
+
 ### Hooks
 
 Hooks run shell commands when events happen. The box reads

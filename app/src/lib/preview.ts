@@ -19,6 +19,17 @@ const status = {
   proxy: { port: 1355, url_port: 1355 },
 };
 
+function kitFixture() {
+  const mode = new URLSearchParams(window.location.search).get("kit");
+  if (mode === "none") return { installed: false, config: { host: "", root: "" } };
+  return {
+    installed: true,
+    config: { host: "devl", root: "/home/alex/work/cal", orca: "/home/alex/.local/bin/orca" },
+    pattern: "*.devl.cal.localhost",
+    worktrees: [{ host: "fix-login-1bda8a.devl.cal.localhost", path: "/home/alex/orca/workspaces/cal/fix-login", port: 3010, active: true }],
+  };
+}
+
 const fixtures: Record<string, unknown> = {
   status,
   networks: firstRun ? [] : [{ name: "personal", state: "Running", tailnet: "example.com", ips: ["100.64.0.10"] }],
@@ -34,6 +45,7 @@ const fixtures: Record<string, unknown> = {
         { name: "fix-login", path: "/home/alex/orca/workspaces/cal/fix-login", branch: "alex/fix-login", head: "1bda8af513" },
       ],
       scripts: { setup: '"$HOME/.local/bin/cal-worktree" setup', archive: '"$HOME/.local/bin/cal-archive"', from: "orca" },
+      cal: true,
     },
     { name: "scratch", path: "/home/alex/scratch", repo: false, scripts: {} },
   ],
@@ -48,6 +60,8 @@ const fixtures: Record<string, unknown> = {
     { location: "cal", worktree: "cal", path: "/home/alex/work/cal", port: 3000, process: "next-server (v16.3.6)", main: true },
     { location: "cal", worktree: "fix-login", path: "/home/alex/orca/workspaces/cal/fix-login", port: 3010, process: "next-server (v16.3.6)" },
   ],
+  // ?kit=none shows the kit offer; otherwise the box has the kit.
+  kit: kitFixture(),
   info: { os: "linux", arch: "amd64", build: "33100c12520f", tools: ["orca", "herdr", "claude", "codex"] },
   doctor: [
     { area: "This computer", name: "starts at login", status: "ok", detail: "background agent installed" },
@@ -81,6 +95,7 @@ export async function previewRun(args: string[]): Promise<string> {
   await delay(120);
   if (args[0] === "url") return `http://${args[2]}.${args[1]}.localhost:1355/\n`;
   if (args[0] === "share") return JSON.stringify({ id: "b71c02aa", port: Number(args[2]), url: "https://quiet-river-demo.trycloudflare.com", started: new Date().toISOString(), state: "live" });
+  if (args[0] === "kit" && args[1] === "install") return JSON.stringify({ kit: { ...kitFixture(), installed: true, pattern: "*.devl.cal.localhost", notes: [] }, routed: true });
   const k = key(args);
   if (k in fixtures) return JSON.stringify(fixtures[k]);
   return "{}";

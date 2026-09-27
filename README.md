@@ -63,6 +63,7 @@ prints into `calport pair '<link>'` or the app.
 calport status                                   # boxes, forwards, proxy
 calport locations devl                           # repos and their worktrees
 calport worktree new devl/cal/fix-login --base main
+calport kit install devl/cal                     # Cal.com: every worktree gets its own app and URL
 calport worktree open devl/cal/fix-login --tool orca --agent claude
 calport services devl                            # dev servers by worktree
 calport doctor devl                              # what the box sees
