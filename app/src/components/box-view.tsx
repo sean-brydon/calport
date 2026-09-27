@@ -2,6 +2,7 @@ import { EllipsisIcon, RefreshCwIcon, StethoscopeIcon, UnlinkIcon } from "lucide
 import { useState } from "react";
 
 import { CheckList } from "@/components/check-list";
+import { OverviewTab } from "@/components/overview-tab";
 import { ServicesTab } from "@/components/services-tab";
 import { SharingTab } from "@/components/sharing-tab";
 import { StateDot } from "@/components/state-dot";
@@ -40,7 +41,7 @@ interface BoxViewProps {
 }
 
 export function BoxView({ box, network, urlPort, forwards, routes, version, lifecycle, onChanged }: BoxViewProps) {
-  const [tab, setTab] = useState("services");
+  const [tab, setTab] = useState("overview");
   const [forgetting, setForgetting] = useState(false);
   const [checking, setChecking] = useState(false);
   return (
@@ -136,10 +137,14 @@ export function BoxView({ box, network, urlPort, forwards, routes, version, life
         )}
         <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="flex min-h-0 flex-1 flex-col">
           <TabsList>
+            <TabsTab value="overview">Overview</TabsTab>
             <TabsTab value="services">Services</TabsTab>
             <TabsTab value="worktrees">Worktrees</TabsTab>
             <TabsTab value="sharing">Sharing</TabsTab>
           </TabsList>
+          <TabsPanel value="overview" className="pt-4">
+            <OverviewTab box={box.name} version={version} />
+          </TabsPanel>
           <TabsPanel value="services" className="pt-4">
             <ServicesTab box={box.name} urlPort={urlPort} forwards={forwards} routes={routes} version={version} onChanged={onChanged} />
           </TabsPanel>

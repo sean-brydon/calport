@@ -51,6 +51,7 @@ Agent sessions
 
 Ports and sharing
   %[1]s ports%[3]s [--json]                             What is listening on the box
+  %[1]s stats%[3]s [--json]                             Memory, disk, load, and agents running or waiting
   %[1]s share%[3]s PORT                                 Make a port public (Cloudflare quick tunnel)
   %[1]s shares%[3]s [--json]                            List public shares
   %[1]s unshare%[3]s ID                                 Stop a share
@@ -66,7 +67,7 @@ Events
 var Commands = map[string]int{
 	"locations": 1, "location": 2, "worktree": 2,
 	"sessions": 1, "session": 2,
-	"services": 1, "info": 1,
+	"services": 1, "info": 1, "stats": 1,
 	"ports": 1, "share": 1, "shares": 1, "unshare": 1,
 	"emit": 1, "events": 1,
 }
@@ -191,6 +192,27 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 			return err
 		}
 		return show(out, true, i, func() {})
+	case "stats":
+		fs, asJSON := flags(rest)
+		parse(fs, rest)
+		st, err := c.Stats(ctx)
+		if err != nil {
+			return err
+		}
+		return show(out, *asJSON, st, func() {
+			fmt.Fprintf(out, "%s  %d CPUs  load %v\n", st.Hostname, st.CPUs, st.Load)
+			fmt.Fprintf(out, "memory  %s of %s\n", gib(st.Memory.Used), gib(st.Memory.Total))
+			for _, d := range st.Disks {
+				fmt.Fprintf(out, "disk %s  %s of %s\n", d.Mount, gib(d.Used), gib(d.Total))
+			}
+			waiting := 0
+			for _, a := range st.Agents {
+				if a.State == "waiting" {
+					waiting++
+				}
+			}
+			fmt.Fprintf(out, "agents  %d running, %d waiting for you\n", len(st.Agents), waiting)
+		})
 	case "location rm":
 		if len(rest) != 1 {
 			return usageErr("location rm NAME")
@@ -521,3 +543,5 @@ func emit(ctx context.Context, c *box.Client, args []string, out io.Writer) erro
 	fmt.Fprintf(out, "Emitted %s at %s\n", positional[0], time.Now().Format("15:04:05"))
 	return nil
 }
+
+func gib(b uint64) string { return fmt.Sprintf("%.1f GiB", float64(b)/(1<<30)) }

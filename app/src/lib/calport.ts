@@ -54,6 +54,33 @@ export interface Location {
   scripts: Scripts;
 }
 
+export interface Usage {
+  total: number;
+  used: number;
+}
+
+export interface BoxAgent {
+  tool: "claude" | "codex" | "cursor";
+  pid: number;
+  path?: string;
+  location?: string;
+  worktree?: string;
+  state: "running" | "waiting" | "finished";
+  since?: string;
+}
+
+export interface BoxStats {
+  hostname: string;
+  uptime_s?: number;
+  cpus: number;
+  load?: number[];
+  memory: Usage;
+  swap: Usage;
+  disks: (Usage & { mount: string })[];
+  agents: BoxAgent[];
+  hooks: boolean;
+}
+
 export interface KitWorktree {
   host: string;
   path: string;
@@ -254,6 +281,7 @@ export const calport = {
   doctor: (box?: string) => json<Check[]>(box ? ["doctor", box] : ["doctor"]),
   services: (box: string) => json<Service[]>(["services", box]),
   kit: (box: string) => json<KitStatus>(["kit", box]),
+  stats: (box: string) => json<BoxStats>(["stats", box]),
   installKit: (box: string, location: string) => json<KitInstall>(["kit", "install", `${box}/${location}`]),
   info: async (box: string) => JSON.parse(await run(["info", box])) as BoxInfo,
   importOrca: (box: string) => run(["location", "import", box, "orca"]),

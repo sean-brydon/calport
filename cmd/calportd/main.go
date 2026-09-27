@@ -209,6 +209,8 @@ func serve(b boxHome, args []string) error {
 	locations := box.NewLocations(filepath.Join(b.dir, "locations.json"))
 	watcher := &box.Watcher{Locations: locations, Events: bus, Box: hostname}
 	go watcher.Run(ctx)
+	agentStates := &box.AgentStates{}
+	go agentStates.Run(ctx, bus)
 	exe, err := os.Executable()
 	if err != nil {
 		ln.Close()
@@ -227,6 +229,7 @@ func serve(b boxHome, args []string) error {
 		DaemonChecks: func() []doctor.Check { return daemonChecks(b, ln.Addr().String()) },
 		LogDir:       filepath.Join(b.dir, "logs"),
 		Kit:          kitInstaller(exe),
+		AgentStates:  agentStates,
 		Update: &box.SelfUpdate{
 			Executable:    exe,
 			Fingerprint:   id.Fingerprint().String(),

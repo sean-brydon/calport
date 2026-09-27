@@ -44,6 +44,8 @@ type Box struct {
 	LogDir string
 	// Kit installs the Cal.com worktree kit; nil where it cannot run.
 	Kit *kit.Installer
+	// AgentStates, when running, says which agents wait for someone.
+	AgentStates *AgentStates
 }
 
 func (b *Box) own(path string) {
@@ -80,6 +82,7 @@ func (b *Box) Mount(s *wire.Server) {
 	route("GET /v1/shares", b.listShares)
 	route("POST /v1/shares", b.addShare)
 	route("DELETE /v1/shares/{id}", b.removeShare)
+	route("GET /v1/stats", b.handleStats)
 	route("GET /v1/kit", b.kitStatus)
 	route("POST /v1/kit", b.installKit)
 	route("GET /v1/info", b.handleInfo)

@@ -62,6 +62,23 @@ const fixtures: Record<string, unknown> = {
   ],
   // ?kit=none shows the kit offer; otherwise the box has the kit.
   kit: kitFixture(),
+  stats: {
+    hostname: "devl",
+    uptime_s: 1_900_000,
+    cpus: 8,
+    load: [0.71, 1.2, 1.26],
+    memory: { total: 67_200_000_000, used: 26_300_000_000 },
+    swap: { total: 0, used: 0 },
+    disks: [{ mount: "/", total: 468_000_000_000, used: 161_000_000_000 }],
+    hooks: true,
+    agents: [
+      { tool: "claude", pid: 101, path: "/home/alex/orca/workspaces/cal/fix-login", location: "cal", worktree: "fix-login", state: "waiting", since: ago(3) },
+      { tool: "claude", pid: 102, path: "/home/alex/work/cal", location: "cal", worktree: "cal", state: "running" },
+      { tool: "codex", pid: 103, path: "/home/alex/work/cal", location: "cal", worktree: "cal", state: "finished", since: ago(12) },
+      { tool: "claude", pid: 104, path: "/home/alex/work/cal-feat-billing-dash", location: "cal", worktree: "feat-billing-dash", state: "running" },
+      { tool: "claude", pid: 105, path: "/home/alex/projects/notes", state: "running" },
+    ],
+  },
   info: { os: "linux", arch: "amd64", build: "33100c12520f", tools: ["orca", "herdr", "claude", "codex"] },
   doctor: [
     { area: "This computer", name: "starts at login", status: "ok", detail: "background agent installed" },

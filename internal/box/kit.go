@@ -104,3 +104,6 @@ func (c *Client) InstallKit(ctx context.Context, req KitRequest) (out KitResult,
 	return out, c.call(ctx, http.MethodPost, "/v1/kit", req, &out)
 }
 
+func (c *Client) Stats(ctx context.Context) (out Stats, err error) {
+	return out, c.call(ctx, http.MethodGet, "/v1/stats", nil, &out)
+}

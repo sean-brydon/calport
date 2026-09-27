@@ -1,0 +1,254 @@
+package box
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/sean-brydon/calport/internal/events"
+)
+
+// Stats is a box at a glance: how loaded it is, and what its agents are doing.
+type Stats struct {
+	Hostname string    `json:"hostname"`
+	Uptime   int64     `json:"uptime_s,omitempty"`
+	CPUs     int       `json:"cpus"`
+	Load     []float64 `json:"load,omitempty"`
+	Memory   Usage     `json:"memory"`
+	Swap     Usage     `json:"swap"`
+	Disks    []Disk    `json:"disks"`
+	Agents   []Agent   `json:"agents"`
+	// Hooks is true when an agent tool on the box reports to calportd, so
+	// an agent's waiting or finished state is known.
+	Hooks bool `json:"hooks"`
+}
+
+// Usage is bytes in use out of a total.
+type Usage struct {
+	Total uint64 `json:"total"`
+	Used  uint64 `json:"used"`
+}
+
+type Disk struct {
+	Mount string `json:"mount"`
+	Usage
+}
+
+// Agent is a coding agent process running on the box.
+type Agent struct {
+	Tool     string `json:"tool"`
+	PID      int    `json:"pid"`
+	Path     string `json:"path,omitempty"`
+	Location string `json:"location,omitempty"`
+	Worktree string `json:"worktree,omitempty"`
+	// State is "waiting" or "finished" when its hooks said so last, and
+	// "running" otherwise.
+	State string    `json:"state"`
+	Since time.Time `json:"since,omitempty"`
+}
+
+// agentTools are the process names counted as agents.
+var agentTools = map[string]string{"claude": "claude", "codex": "codex", "cursor-agent": "cursor"}
+
+// AgentStates remembers what each agent's hooks said last, by working
+// directory, from the box's event stream.
+type AgentStates struct {
+	mu   sync.Mutex
+	last map[string]agentState
+}
+
+type agentState struct {
+	state string
+	at    time.Time
+}
+
+// Run follows bus until ctx ends.
+func (a *AgentStates) Run(ctx context.Context, bus *events.Bus) {
+	ch, stop := bus.Subscribe()
+	defer stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e := <-ch:
+			a.observe(e)
+		}
+	}
+}
+
+func (a *AgentStates) observe(e events.Event) {
+	path, _ := e.Data["path"].(string)
+	if path == "" {
+		return
+	}
+	state := map[string]string{"agent.waiting": "waiting", "agent.finished": "finished", "agent.started": "running"}[e.Type]
+	if state == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.last == nil {
+		a.last = map[string]agentState{}
+	}
+	at := e.Time
+	if at.IsZero() {
+		at = time.Now()
+	}
+	a.last[filepath.Clean(path)] = agentState{state, at}
+}
+
+func (a *AgentStates) get(path string) (agentState, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s, ok := a.last[filepath.Clean(path)]
+	return s, ok
+}
+
+func (b *Box) handleStats(w http.ResponseWriter, r *http.Request) error {
+	s := collectStats("/proc")
+	locs, _ := b.Locations.List(r.Context())
+	for i := range s.Agents {
+		ag := &s.Agents[i]
+		ag.Location, ag.Worktree = worktreeFor(locs, ag.Path)
+		ag.State = "running"
+		if b.AgentStates != nil {
+			if st, ok := b.AgentStates.get(ag.Path); ok && st.state != "running" {
+				ag.State, ag.Since = st.state, st.at
+			}
+		}
+	}
+	home, _ := os.UserHomeDir()
+	s.Hooks = hooksInstalled(home)
+	writeJSON(w, s)
+	return nil
+}
+
+// worktreeFor names the location and worktree a directory is in, choosing
+// the deepest worktree that contains it.
+func worktreeFor(locs []Location, dir string) (location, worktree string) {
+	best := -1
+	for _, l := range locs {
+		for _, wt := range l.Worktrees {
+			if (dir == wt.Path || strings.HasPrefix(dir, wt.Path+"/")) && len(wt.Path) > best {
+				best, location, worktree = len(wt.Path), l.Name, wt.Name
+			}
+		}
+	}
+	return location, worktree
+}
+
+// hooksInstalled reports whether Claude Code on this box reports to calportd.
+func hooksInstalled(home string) bool {
+	b, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	return err == nil && bytes.Contains(b, []byte("calportd hook"))
+}
+
+func collectStats(proc string) Stats {
+	s := Stats{CPUs: runtime.NumCPU()}
+	s.Hostname, _ = os.Hostname()
+	if b, err := os.ReadFile(filepath.Join(proc, "uptime")); err == nil {
+		if f := strings.Fields(string(b)); len(f) > 0 {
+			up, _ := strconv.ParseFloat(f[0], 64)
+			s.Uptime = int64(up)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(proc, "loadavg")); err == nil {
+		f := strings.Fields(string(b))
+		for _, f := range f[:min(3, len(f))] {
+			v, _ := strconv.ParseFloat(f, 64)
+			s.Load = append(s.Load, v)
+		}
+	}
+	s.Memory, s.Swap = memInfo(filepath.Join(proc, "meminfo"))
+	s.Disks = disks()
+	s.Agents = agentProcesses(proc)
+	return s
+}
+
+// memInfo reads /proc/meminfo. Used memory is what applications hold:
+// total less what the kernel could hand out now, caches included.
+func memInfo(path string) (mem, swap Usage) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	kb := map[string]uint64{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		k, v, ok := strings.Cut(sc.Text(), ":")
+		if !ok {
+			continue
+		}
+		n, _ := strconv.ParseUint(strings.Fields(v)[0], 10, 64)
+		kb[k] = n * 1024
+	}
+	mem = Usage{Total: kb["MemTotal"], Used: kb["MemTotal"] - kb["MemAvailable"]}
+	swap = Usage{Total: kb["SwapTotal"], Used: kb["SwapTotal"] - kb["SwapFree"]}
+	return
+}
+
+// disks reports the root filesystem and, when separate, the home one.
+func disks() []Disk {
+	var out []Disk
+	seen := map[uint64]bool{}
+	home, _ := os.UserHomeDir()
+	for _, mount := range []string{"/", home} {
+		var st syscall.Statfs_t
+		if mount == "" || syscall.Statfs(mount, &st) != nil {
+			continue
+		}
+		id := uint64(st.Blocks)<<16 ^ uint64(st.Bsize)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		bs := uint64(st.Bsize)
+		total := uint64(st.Blocks) * bs
+		out = append(out, Disk{Mount: mount, Usage: Usage{Total: total, Used: total - uint64(st.Bavail)*bs}})
+	}
+	return out
+}
+
+// agentProcesses lists agent processes this user can see, with where they run.
+func agentProcesses(proc string) []Agent {
+	entries, err := os.ReadDir(proc)
+	if err != nil {
+		return nil
+	}
+	var out []Agent
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		dir := filepath.Join(proc, e.Name())
+		comm, err := os.ReadFile(filepath.Join(dir, "comm"))
+		if err != nil {
+			continue
+		}
+		tool, ok := agentTools[strings.TrimSpace(string(comm))]
+		if !ok {
+			continue
+		}
+		cwd, err := os.Readlink(filepath.Join(dir, "cwd"))
+		if err != nil {
+			continue
+		}
+		// An agent left in a worktree that was since removed.
+		cwd = strings.TrimSuffix(cwd, " (deleted)")
+		out = append(out, Agent{Tool: tool, PID: pid, Path: cwd})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PID < out[j].PID })
+	return out
+}
