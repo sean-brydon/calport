@@ -7,7 +7,7 @@ import (
 
 func TestNameFromHostname(t *testing.T) {
 	for in, want := range map[string]string{
-		"Alexs-MacBook-Pro.local":      "Alexs-MacBook-Pro",
+		"Alexs-MacBook-Pro.local":      "alexs-macbook-pro",
 		"alex's laptop":                "alex-s-laptop",
 		"--weird--":                    "weird",
 		"ünïcode-box":                  "n-code-box",

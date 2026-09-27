@@ -64,6 +64,9 @@ func addSSH(l laptop, args []string) error {
 		return errors.New("usage: calport add ssh [user@]HOST [--name N] [--network NET] [--listen ADDR] [--address ADDR] [-- SSH OPTIONS]")
 	}
 	target := pos[0]
+	if err := checkName(*name); err != nil {
+		return err
+	}
 	if *via != "" {
 		// SSH to the box through the same network calport will use.
 		exe, err := os.Executable()
@@ -72,8 +75,26 @@ func addSSH(l laptop, args []string) error {
 		}
 		sshArgs = append([]string{"-o", fmt.Sprintf("ProxyCommand=%s network proxy %s %%h %%p", shellQuote(exe), *via)}, sshArgs...)
 	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	// The steps share one connection, so a password or host key question is
+	// asked once. /tmp keeps the socket path under macOS's 104-byte limit.
+	control, err := os.MkdirTemp("/tmp", "cpssh")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(control)
+	sshArgs = append([]string{"-o", "ControlPath=" + filepath.Join(control, "%C")}, sshArgs...)
+	env := askpassEnv(exe)
+	if err := openMaster(sshArgs, target, env, control); err != nil {
+		return err
+	}
+	defer exec.Command("ssh", append(append([]string{}, sshArgs...), "-O", "exit", target)...).Run()
 	ssh := func(stdin []byte, remote string) ([]byte, error) {
-		cmd := exec.Command("ssh", append(append([]string{"-o", "BatchMode=yes"}, sshArgs...), target, remote)...)
+		cmd := exec.Command("ssh", append(append([]string{}, sshArgs...), target, remote)...)
+		cmd.Env = env
 		if stdin != nil {
 			cmd.Stdin = bytes.NewReader(stdin)
 		}
@@ -81,7 +102,7 @@ func addSSH(l laptop, args []string) error {
 		cmd.Stderr = &stderr
 		out, err := cmd.Output()
 		if err != nil {
-			return out, fmt.Errorf("ssh %s: %v: %s", target, err, strings.TrimSpace(stderr.String()))
+			return out, sshError(target, err, stderr.String())
 		}
 		return out, nil
 	}
@@ -92,10 +113,6 @@ func addSSH(l laptop, args []string) error {
 		return err
 	}
 	daemon, err := daemonFor(string(uname))
-	if err != nil {
-		return err
-	}
-	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
@@ -166,6 +183,53 @@ func addSSH(l laptop, args []string) error {
 	}
 	fmt.Printf("Paired with %s at %s. SSH is no longer needed for this box.\n", peer.Name, peer.Address)
 	return nil
+}
+
+// checkName refuses a --name that cannot be a hostname before any work is
+// done, suggesting one that can.
+func checkName(name string) error {
+	if name == "" || trust.ValidName(name) {
+		return nil
+	}
+	return fmt.Errorf("%q cannot be a box name: it is part of URLs like 3000.NAME.localhost. Try --name %s", name, trust.NameFromHostname(name, "box"))
+}
+
+// openMaster authenticates once and leaves a shared connection in the
+// background. Its stderr goes to a file, not a pipe: the backgrounded ssh
+// keeps it open, and waiting on a pipe would wait for that process to exit.
+func openMaster(sshArgs []string, target string, env []string, dir string) error {
+	errFile, err := os.Create(filepath.Join(dir, "stderr"))
+	if err != nil {
+		return err
+	}
+	defer errFile.Close()
+	cmd := exec.Command("ssh", append(append([]string{"-o", "ControlMaster=yes", "-o", "ControlPersist=120", "-f", "-N"}, sshArgs...), target)...)
+	cmd.Env = env
+	cmd.Stderr = errFile
+	if err := cmd.Run(); err != nil {
+		stderr, _ := os.ReadFile(errFile.Name())
+		return sshError(target, err, string(stderr))
+	}
+	return nil
+}
+
+// sshError explains the failures people hit on a first connection.
+func sshError(target string, err error, stderr string) error {
+	stderr = strings.TrimSpace(stderr)
+	switch {
+	case strings.Contains(stderr, "REMOTE HOST IDENTIFICATION HAS CHANGED"):
+		return fmt.Errorf("%s's host key has changed since you last connected. If the box was rebuilt, remove the old key with `ssh-keygen -R <host>` and try again; otherwise do not connect", target)
+	case strings.Contains(stderr, "Host key verification failed"):
+		return fmt.Errorf("%s's host key was not trusted, so calport did not connect", target)
+	case strings.Contains(stderr, "Permission denied"):
+		return fmt.Errorf("%s refused the login (%s). Check the user, and that your SSH agent (such as 1Password) offers the right key", target, lastLine(stderr))
+	}
+	return fmt.Errorf("ssh %s: %v: %s", target, err, stderr)
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return lines[len(lines)-1]
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

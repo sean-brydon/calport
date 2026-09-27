@@ -53,3 +53,13 @@ export function lifecycleOf(e: CalportEvent): [string, Lifecycle] | undefined {
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+
+// boxName mirrors calport's NameFromHostname: box names are hostnames in URLs.
+export function boxName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[-._]+|[-._]+$/g, "")
+    .slice(0, 63);
+}

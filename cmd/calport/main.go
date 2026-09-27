@@ -72,6 +72,13 @@ CALPORT_HOME overrides the state directory.
 `
 
 func main() {
+	// ssh runs SSH_ASKPASS with the prompt as its only argument.
+	if os.Getenv(askpassMarker) == "1" && len(os.Args) == 2 {
+		if err := askpass(os.Args[1:]); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "help" || os.Args[1] == "-h" || os.Args[1] == "--help") {
 		fmt.Print(usage)
 		fmt.Println()
@@ -273,8 +280,8 @@ func pair(l laptop, args []string) error {
 	boxes := l.boxes()
 	// Check the requested name before spending the single-use code on the box.
 	if *name != "" {
-		if !trust.ValidName(*name) {
-			return fmt.Errorf("invalid box name %q", *name)
+		if err := checkName(*name); err != nil {
+			return err
 		}
 		if existing, ok, err := boxes.ByName(*name); err != nil {
 			return err

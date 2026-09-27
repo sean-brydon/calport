@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toastManager } from "@/components/ui/toast";
 import { calport, type Network } from "@/lib/calport";
+import { boxName } from "@/lib/format";
 
 interface ConnectBoxProps {
   networks: Network[];
@@ -69,6 +70,25 @@ function NetworkSelect({ networks, value, onChange, onNetworksChanged }: Network
         <button type="button" className="underline underline-offset-4" onClick={() => setJoining(true)}>
           Join that tailnet
         </button>
+      </FieldDescription>
+    </Field>
+  );
+}
+
+function BoxNameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const slug = boxName(value);
+  return (
+    <Field>
+      <FieldLabel>Name (optional)</FieldLabel>
+      <Input value={value} placeholder="The box's hostname" onChange={(e) => onChange(e.target.value)} />
+      <FieldDescription>
+        {slug ? (
+          <>
+            Its URLs look like <code className="font-mono">3000.{slug}.localhost</code>
+          </>
+        ) : (
+          "Used in its URLs, like 3000.NAME.localhost"
+        )}
       </FieldDescription>
     </Field>
   );
@@ -142,11 +162,11 @@ function SSHForm({ networks, network, setNetwork, onNetworksChanged, onConnected
               const m = line.match(/^Paired with (\S+)/);
               if (m) paired = m[1];
             },
-            name.trim() || undefined,
+            boxName(name) || undefined,
             network || undefined,
           );
           toastManager.add({ title: `Connected ${paired || host}`, type: "success" });
-          onConnected(paired || name || host);
+          onConnected(paired || boxName(name) || host);
         } catch (err) {
           setError(errorText(err));
         } finally {
@@ -158,15 +178,16 @@ function SSHForm({ networks, network, setNetwork, onNetworksChanged, onConnected
         Calport uses your SSH access once to install its small daemon on the box, then pairs with it. After that it
         never needs SSH again. The daemon only listens on the box's tailnet address.
       </p>
+      <p className="text-muted-foreground text-sm">
+        Keys from your SSH agent, like 1Password, work as usual. If the box is new to this computer, or asks for a
+        password, Calport shows you its fingerprint or asks for the password, once.
+      </p>
       <Field>
         <FieldLabel>Host</FieldLabel>
         <Input required value={host} placeholder="dev-alex or alex@203.0.113.5" className="font-mono" onChange={(e) => setHost(e.target.value)} />
         <FieldDescription>Anything you can type after <code>ssh</code>.</FieldDescription>
       </Field>
-      <Field>
-        <FieldLabel>Name (optional)</FieldLabel>
-        <Input value={name} placeholder="The box's hostname" onChange={(e) => setName(e.target.value)} />
-      </Field>
+      <BoxNameField value={name} onChange={setName} />
       <NetworkSelect networks={networks} value={network} onChange={setNetwork} onNetworksChanged={onNetworksChanged} />
       <Progress lines={lines} busy={busy} />
       {error && <p className="text-destructive-foreground text-sm">{error}</p>}
@@ -217,7 +238,7 @@ function LinkForm({ networks, network, setNetwork, onNetworksChanged, onConnecte
         setBusy(true);
         setError(undefined);
         try {
-          const peer = (await calport.pair(link.trim(), name.trim() || undefined, network || undefined)) as { name: string };
+          const peer = (await calport.pair(link.trim(), boxName(name) || undefined, network || undefined)) as { name: string };
           toastManager.add({ title: `Connected ${peer.name}`, type: "success" });
           onConnected(peer.name);
         } catch (err) {
@@ -240,10 +261,7 @@ function LinkForm({ networks, network, setNetwork, onNetworksChanged, onConnecte
         <Textarea required value={link} placeholder="calport://…" className="font-mono" onChange={(e) => setLink(e.target.value)} />
         <FieldDescription>Single use and valid for 10 minutes.</FieldDescription>
       </Field>
-      <Field>
-        <FieldLabel>Name (optional)</FieldLabel>
-        <Input value={name} placeholder="The box's hostname" onChange={(e) => setName(e.target.value)} />
-      </Field>
+      <BoxNameField value={name} onChange={setName} />
       <NetworkSelect networks={networks} value={network} onChange={setNetwork} onNetworksChanged={onNetworksChanged} />
       {error && <p className="text-destructive-foreground text-sm">{error}</p>}
       <div>

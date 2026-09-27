@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/sean-brydon/calport/internal/identity"
@@ -67,7 +68,7 @@ func (s *Store) ByName(name string) (Peer, bool, error) {
 		return Peer{}, false, err
 	}
 	for _, p := range peers {
-		if p.Name == name {
+		if strings.EqualFold(p.Name, name) {
 			return p, true, nil
 		}
 	}
@@ -80,13 +81,15 @@ func (s *Store) Add(p Peer) error {
 	if !ValidName(p.Name) {
 		return fmt.Errorf("invalid peer name %q", p.Name)
 	}
+	// Names are hostnames in URLs, which browsers lowercase.
+	p.Name = strings.ToLower(p.Name)
 	return s.update(func(peers []Peer) ([]Peer, error) {
 		out := peers[:0]
 		for _, existing := range peers {
 			if existing.Fingerprint == p.Fingerprint {
 				continue
 			}
-			if existing.Name == p.Name {
+			if strings.EqualFold(existing.Name, p.Name) {
 				return nil, ErrNameTaken
 			}
 			out = append(out, existing)
@@ -116,7 +119,7 @@ func (s *Store) Remove(nameOrFingerprint string) (Peer, error) {
 	var removed Peer
 	err := s.update(func(peers []Peer) ([]Peer, error) {
 		for i, p := range peers {
-			if p.Name == nameOrFingerprint || p.Fingerprint.String() == nameOrFingerprint {
+			if strings.EqualFold(p.Name, nameOrFingerprint) || p.Fingerprint.String() == nameOrFingerprint {
 				removed = p
 				return append(peers[:i], peers[i+1:]...), nil
 			}

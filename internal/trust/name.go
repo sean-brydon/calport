@@ -5,7 +5,7 @@ import "strings"
 // NameFromHostname turns a hostname into a peer label,
 // e.g. "Alexs-MacBook-Pro.local" becomes "Alexs-MacBook-Pro".
 func NameFromHostname(hostname, fallback string) string {
-	name := strings.TrimSuffix(hostname, ".local")
+	name := strings.ToLower(strings.TrimSuffix(hostname, ".local"))
 	var b strings.Builder
 	for _, r := range name {
 		switch {

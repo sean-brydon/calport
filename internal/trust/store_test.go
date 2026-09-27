@@ -48,6 +48,21 @@ func TestANameHeldByAnotherKeyIsNotReassigned(t *testing.T) {
 	}
 }
 
+// Names are hostnames in URLs, which browsers lowercase, so they must not
+// differ by case alone.
+func TestNamesAreCaseInsensitive(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "boxes.json"))
+	if err := s.Add(Peer{Name: "Dev-Alex", Fingerprint: fp()}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, _ := s.ByName("dev-alex"); !ok || got.Name != "dev-alex" {
+		t.Fatalf("ByName(dev-alex) = %+v, %v; want the box, stored lowercase", got, ok)
+	}
+	if err := s.Add(Peer{Name: "DEV-ALEX", Fingerprint: fp()}); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("a second key took the same name in another case: %v", err)
+	}
+}
+
 func TestRepairingAKnownKeyReplacesItsEntry(t *testing.T) {
 	s := NewStore(filepath.Join(t.TempDir(), "boxes.json"))
 	key := fp()
