@@ -107,14 +107,21 @@ does not move to a new one, and it leaves a runtime that is already serving
 on that port alone rather than restarting it.
 
 When a pairing stops working and reconnecting keeps failing the same way —
-the box was rebuilt so its runtime identity no longer matches, or the port it
-was pinned to on the first attempt is one this computer cannot listen on —
-`calport orca disconnect BOX` is the way out. It drops the saved route,
+the box was rebuilt, say, so the runtime answering the saved route is no
+longer the one this computer paired with — `calport orca disconnect BOX` is
+the way out. It drops the saved route,
 pinned port included, and removes the tunnel, so the next `calport orca
-connect BOX` starts over on a fresh port. It leaves the runtime unit serving
-on the box (`calport unit rm BOX/calport-orca` stops that) and leaves the
-Orca environment alone; if Orca still lists one for the box, remove it in the
-Orca app.
+connect BOX` starts over from nothing instead of reusing a route that cannot
+work. It leaves the runtime unit serving on the box (`calport unit rm
+BOX/calport-orca` stops that) and leaves the Orca environment alone; if Orca
+still lists one for the box, remove it in the Orca app.
+
+It does not, however, move a box to a different local port. The pinned port is
+released, but allocation still starts from the same base and nothing checks
+whether a port can be listened on, so a box pinned to a port this computer
+cannot bind will usually be pinned to that same port again. Disconnecting
+fixes a stale route or a runtime identity that no longer matches; it does not
+work around a port that is unavailable here.
 
 `calport orca status BOX` only reports whether
 the runtime this computer already paired with is reachable — it neither

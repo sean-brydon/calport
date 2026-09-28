@@ -313,10 +313,9 @@ func TestDisconnectOnAnUnpairedBoxSaysSo(t *testing.T) {
 	}
 }
 
-// A port is pinned on the first attempt, before anything pairs. If that port
-// is already taken on this laptop the box is stuck on it, so disconnect must
-// free it for a different one.
-func TestDisconnectFreesThePinnedPortForReallocation(t *testing.T) {
+// The pinned port is part of the route, so forgetting the route must release
+// it rather than leave it reserved for a box that is no longer paired.
+func TestDisconnectReleasesThePinnedPort(t *testing.T) {
 	c, _ := connector(t, "exit 1", nil)
 	first, err := c.Store.PortFor("devl")
 	if err != nil {
@@ -326,8 +325,7 @@ func TestDisconnectFreesThePinnedPortForReallocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The freed port goes to whoever asks next, and devl is pinned again from
-	// scratch - which is the point: a port it could not listen on is not the
-	// port it gets back.
+	// scratch rather than handed back the port it used to hold.
 	taken, err := c.Store.PortFor("omarchy")
 	if err != nil || taken != first {
 		t.Fatalf("PortFor(omarchy) = %d, %v; want the freed port %d", taken, err, first)

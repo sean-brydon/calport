@@ -224,9 +224,14 @@ type Disconnected struct {
 
 // Disconnect forgets a box's pairing on this laptop: the saved route and the
 // pinned tunnel. It is the way out of a pairing that cannot be repaired in
-// place - a runtime whose identity was regenerated, or a port pinned before
-// anything paired that this laptop cannot listen on - because both are held in
-// the route, and Connect reuses the route rather than replacing it.
+// place - a runtime whose identity was regenerated, say - because the stale
+// identity is held in the route and Connect reuses the route rather than
+// replacing it.
+//
+// It does not choose a different local port. The route's pinned port is
+// released, but allocation still walks up from portBase and nothing probes
+// whether a port can be listened on, so a box pinned to a port this laptop
+// cannot bind will usually be pinned to it again.
 //
 // It deliberately leaves the box's unit running and the local Orca environment
 // paired. Neither is calport's to throw away: the unit may be serving other

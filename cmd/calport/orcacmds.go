@@ -19,7 +19,7 @@ const orcaUsage = `Usage:
 
 connect is the whole flow; serve exists for running a runtime without pairing
 to it from here. disconnect is the way out of a pairing that stopped working:
-it drops the route and the tunnel so connect can start over, on a fresh port.
+it drops the route and the tunnel so connect can start over from nothing.
 
 Orca stores the pairing credential; calport stores only the route and the
 runtime's identity.
@@ -71,7 +71,7 @@ func orcaCommand(l laptop, args []string) error {
 			fmt.Printf("Removed the tunnel that carried it.\n")
 		}
 		fmt.Printf("Still there: the %s unit on %s, which keeps serving (calport unit rm %s/%s stops it), and an Orca environment named %s, if Orca paired one - remove that in the Orca app.\n", orca.UnitName, boxName, boxName, orca.UnitName, boxName)
-		fmt.Printf("Run calport orca connect %s to pair again; it takes a fresh port.\n", boxName)
+		fmt.Printf("Run calport orca connect %s to pair again; the port is released and reallocated, so it may well be the same one.\n", boxName)
 		return nil
 	case "status":
 		routes, err := conn.Store.Read()
