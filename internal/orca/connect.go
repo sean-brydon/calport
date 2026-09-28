@@ -2,6 +2,7 @@ package orca
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,6 +19,11 @@ const readyWait = 60 * time.Second
 // readLimit is how much of the runtime's log is read. Records are appended, so
 // the end is what matters.
 const readLimit = 1 << 20
+
+// cleanupTimeout bounds rollback. It runs on a context detached from the
+// caller's, because the caller's ctx being done is often exactly why rollback
+// is running — reusing it would make cleanup fail instantly and silently.
+const cleanupTimeout = 15 * time.Second
 
 // Pin is the forward key for a box's runtime tunnel.
 func Pin(boxName string) string { return "orca/" + boxName }
@@ -91,12 +97,19 @@ func (c *Connector) Serve(ctx context.Context, boxName string) (Ready, error) {
 // verifies the runtime is the one paired with, and saves the route. A failure
 // after something was created undoes only what this call created: an
 // environment that already existed is never removed.
-func (c *Connector) Connect(ctx context.Context, boxName string) (Route, error) {
+//
+// The original failure is often the caller's ctx being cancelled or timing
+// out, which is exactly when rollback must still run. So rollback uses its
+// own bounded context detached from ctx, and any rollback failure is folded
+// into the returned error rather than swallowed: silence here would leave a
+// paired environment - holding a pairing credential - orphaned with nobody
+// told.
+func (c *Connector) Connect(ctx context.Context, boxName string) (route Route, err error) {
 	ready, err := c.Serve(ctx, boxName)
 	if err != nil {
 		return Route{}, err
 	}
-	route := Route{Runtime: ready.RuntimeID, LocalPort: ready.LocalPort, RemotePort: ready.RemotePort}
+	route = Route{Runtime: ready.RuntimeID, LocalPort: ready.LocalPort, RemotePort: ready.RemotePort}
 
 	fwdID, createdForward, err := c.tunnel(ctx, boxName, route)
 	if err != nil {
@@ -108,11 +121,21 @@ func (c *Connector) Connect(ctx context.Context, boxName string) (Route, error) 
 		if done {
 			return
 		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		defer cancel()
+		var cleanupErrs []error
 		if createdEnvironment != "" {
-			c.CLI.RemoveEnvironment(ctx, createdEnvironment)
+			if rmErr := c.CLI.RemoveEnvironment(cleanupCtx, createdEnvironment); rmErr != nil {
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("an Orca environment for %s was left paired and could not be removed automatically; remove it manually: %w", boxName, rmErr))
+			}
 		}
 		if createdForward {
-			c.Forwards.RemoveForward(ctx, fwdID)
+			if _, rmErr := c.Forwards.RemoveForward(cleanupCtx, fwdID); rmErr != nil {
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("a tunnel forward for %s was left behind and could not be removed automatically: %w", boxName, rmErr))
+			}
+		}
+		if len(cleanupErrs) > 0 {
+			err = errors.Join(append([]error{err}, cleanupErrs...)...)
 		}
 	}()
 

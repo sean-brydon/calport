@@ -20,7 +20,7 @@ type fakeUnits struct {
 }
 
 func (f *fakeUnits) AddUnit(context.Context, box.UnitRequest) (box.Unit, error) {
-	return box.Unit{Name: "calport-orca", State: "Running"}, f.err
+	return box.Unit{Name: "calport-orca", State: "installed"}, f.err
 }
 func (f *fakeUnits) UnitLog(context.Context, string, int64) ([]byte, error) { return f.log, nil }
 
@@ -155,6 +155,13 @@ exit 1
 	if r, ok := saved["devl"]; ok && r.Environment != "" {
 		t.Fatalf("saved route = %+v; want no environment saved after a failure", r)
 	}
+	body, err := os.ReadFile(callsFile(t, c.CLI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "environment rm") {
+		t.Fatal("Connect did not remove the environment it created")
+	}
 }
 
 func TestConnectKeepsAReusedEnvironmentWhenVerifyFails(t *testing.T) {
@@ -209,5 +216,37 @@ exit 1
 	}
 	if strings.Contains(err.Error(), "SECRET-TOKEN") {
 		t.Fatalf("error leaks the pairing credential: %v", err)
+	}
+}
+
+func TestConnectReportsAnOrphanedEnvironmentWhenCleanupFails(t *testing.T) {
+	// The runtime mismatch (like TestConnectUndoesANewEnvironmentWhenVerifyFails)
+	// triggers rollback, but this time "environment rm" itself fails - so the
+	// environment calport just paired is stuck. The caller must be told, in
+	// recoverable terms, rather than only seeing the original mismatch.
+	c, _ := connector(t, `
+case "$1 $2" in
+"environment list") echo '{"ok":true,"result":{"environments":[]}}'; exit 0;;
+"environment add") echo '{"ok":true,"result":{"environment":{"id":"env-new"}}}'; exit 0;;
+"environment rm") echo '{"ok":false,"error":{"message":"refused"}}'; exit 1;;
+esac
+case "$1" in
+status) echo '{"ok":true,"result":{"runtime":{"runtimeId":"runtime-other","reachable":true}}}'; exit 0;;
+esac
+exit 1
+`, readyLog(t, portBase, "runtime-1"))
+
+	_, err := c.Connect(context.Background(), "devl")
+	if err == nil {
+		t.Fatal("Connect() succeeded with a mismatched runtime; want an error")
+	}
+	if strings.Contains(err.Error(), "SECRET-TOKEN") {
+		t.Fatalf("error leaks the pairing credential: %v", err)
+	}
+	if !strings.Contains(err.Error(), "devl") || !strings.Contains(err.Error(), "left paired") {
+		t.Fatalf("Connect() = %v; want it to name the box and say an environment was left paired", err)
+	}
+	if !strings.Contains(err.Error(), "not the one calport paired with") {
+		t.Fatalf("Connect() = %v; want the original verify failure to still be reported", err)
 	}
 }
