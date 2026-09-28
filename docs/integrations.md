@@ -101,7 +101,20 @@ Orca.
 A box's local port is fixed the first time it pairs, because the pairing
 code the local Orca app stores embeds that port. Reconnecting (`calport orca
 connect BOX` again) restores the tunnel on the same port if it was lost; it
-does not move to a new one. `calport orca status BOX` only reports whether
+does not move to a new one, and it leaves a runtime that is already serving
+on that port alone rather than restarting it.
+
+When a pairing stops working and reconnecting keeps failing the same way —
+the box was rebuilt so its runtime identity no longer matches, or the port it
+was pinned to on the first attempt is one this computer cannot listen on —
+`calport orca disconnect BOX` is the way out. It drops the saved route,
+pinned port included, and removes the tunnel, so the next `calport orca
+connect BOX` starts over on a fresh port. It leaves the runtime unit serving
+on the box (`calport unit rm BOX/calport-orca` stops that) and leaves the
+Orca environment alone; if Orca still lists one for the box, remove it in the
+Orca app.
+
+`calport orca status BOX` only reports whether
 the runtime this computer already paired with is reachable — it neither
 installs nor pairs anything. `calport orca exec BOX -- ARGS` runs an `orca`
 command against that box's paired runtime, and `calport orca serve BOX`

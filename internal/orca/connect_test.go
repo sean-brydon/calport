@@ -250,3 +250,90 @@ exit 1
 		t.Fatalf("Connect() = %v; want the original verify failure to still be reported", err)
 	}
 }
+
+func TestServeReportsAUnitThatWouldNotInstall(t *testing.T) {
+	c, fwd := connector(t, "exit 1", readyLog(t, portBase, "runtime-1"))
+	c.Units = &fakeUnits{log: readyLog(t, portBase, "runtime-1"), err: errors.New("the box refused the unit")}
+
+	if _, err := c.Serve(context.Background(), "devl"); err == nil || !strings.Contains(err.Error(), "refused the unit") {
+		t.Fatalf("Serve() = %v; want the box's install failure surfaced", err)
+	}
+	// Connect must not tunnel to a runtime that was never started: a forward
+	// created here would outlive the failure with nothing on the far end.
+	if _, err := c.Connect(context.Background(), "devl"); err == nil {
+		t.Fatal("Connect() succeeded although the unit would not install")
+	}
+	if len(fwd.added) != 0 {
+		t.Fatalf("forwards added = %+v; want none when the unit never started", fwd.added)
+	}
+}
+
+func TestDisconnectDropsTheRouteAndTheTunnel(t *testing.T) {
+	c, fwd := connector(t, `
+case "$1 $2" in
+"environment list") echo '{"ok":true,"result":{"environments":[]}}'; exit 0;;
+"environment add") echo '{"ok":true,"result":{"environment":{"id":"env-new"}}}'; exit 0;;
+esac
+case "$1" in
+status) echo '{"ok":true,"result":{"runtime":{"runtimeId":"runtime-1","reachable":true}}}'; exit 0;;
+esac
+exit 1
+`, readyLog(t, portBase, "runtime-1"))
+
+	route, err := c.Connect(context.Background(), "devl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwd.existing = []agent.ForwardStatus{{Forward: fwd.added[0]}}
+
+	got, err := c.Disconnect(context.Background(), "devl")
+	if err != nil {
+		t.Fatalf("Disconnect() = %v", err)
+	}
+	if !got.HadRoute || got.Route != route {
+		t.Fatalf("Disconnect() = %+v; want the route it dropped, %+v", got, route)
+	}
+	if !got.RemovedForward || len(fwd.removed) != 1 || fwd.removed[0] != fwd.added[0].ID {
+		t.Fatalf("forwards removed = %v; want the pinned tunnel gone", fwd.removed)
+	}
+	saved, err := c.Store.Read()
+	if err != nil || len(saved) != 0 {
+		t.Fatalf("saved routes = %+v, %v; want the box forgotten, pinned port included", saved, err)
+	}
+}
+
+func TestDisconnectOnAnUnpairedBoxSaysSo(t *testing.T) {
+	c, fwd := connector(t, "exit 1", nil)
+	got, err := c.Disconnect(context.Background(), "devl")
+	if err != nil {
+		t.Fatalf("Disconnect() = %v; want a quiet no-op", err)
+	}
+	if got.HadRoute || got.RemovedForward || len(fwd.removed) != 0 {
+		t.Fatalf("Disconnect() = %+v, removed %v; want nothing dropped", got, fwd.removed)
+	}
+}
+
+// A port is pinned on the first attempt, before anything pairs. If that port
+// is already taken on this laptop the box is stuck on it, so disconnect must
+// free it for a different one.
+func TestDisconnectFreesThePinnedPortForReallocation(t *testing.T) {
+	c, _ := connector(t, "exit 1", nil)
+	first, err := c.Store.PortFor("devl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Disconnect(context.Background(), "devl"); err != nil {
+		t.Fatal(err)
+	}
+	// The freed port goes to whoever asks next, and devl is pinned again from
+	// scratch - which is the point: a port it could not listen on is not the
+	// port it gets back.
+	taken, err := c.Store.PortFor("omarchy")
+	if err != nil || taken != first {
+		t.Fatalf("PortFor(omarchy) = %d, %v; want the freed port %d", taken, err, first)
+	}
+	again, err := c.Store.PortFor("devl")
+	if err != nil || again == first {
+		t.Fatalf("PortFor(devl) = %d, %v; want a port other than the one it was pinned to", again, err)
+	}
+}

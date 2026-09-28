@@ -17,6 +17,14 @@ import (
 // working environment, so the caller is told instead.
 var ErrEnvironmentEndpointDiffers = errors.New("an Orca environment for this box already uses a different endpoint")
 
+// ErrRuntimeIdentityDiffers means the environment reaches some other runtime
+// than the one calport paired with: the box was rebuilt, or its runtime
+// identity was regenerated. A pairing in that state cannot be repaired in
+// place - calport reuses the saved route and the existing environment on every
+// attempt, so every retry fails the same way - which is why the error names
+// the command that throws the pairing away.
+var ErrRuntimeIdentityDiffers = errors.New("the Orca runtime answering this environment is not the one calport paired with")
+
 const cliTimeout = 45 * time.Second
 
 // Environment is one of the local Orca app's environments.
@@ -145,7 +153,7 @@ func (c CLI) Verify(ctx context.Context, environment, runtime string) error {
 		return fmt.Errorf("the Orca runtime for this environment is not reachable")
 	}
 	if r.Result.Runtime.ID != runtime {
-		return fmt.Errorf("the Orca runtime answering this environment is not the one calport paired with")
+		return fmt.Errorf("%w; if the box was rebuilt or re-paired, forget the pairing and start over: calport orca disconnect BOX, then calport orca connect BOX", ErrRuntimeIdentityDiffers)
 	}
 	return nil
 }

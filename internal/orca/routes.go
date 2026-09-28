@@ -82,3 +82,25 @@ func (s Store) PortFor(box string) (int, error) {
 	}
 	return port, nil
 }
+
+// Forget drops a box's route, including its pinned port, and reports what was
+// there. Re-pairing then starts from scratch: the port is reallocated, so a
+// box pinned to a port this laptop cannot listen on is no longer stuck with
+// it.
+func (s Store) Forget(box string) (Route, bool, error) {
+	unlock, err := statefile.Lock(s.Path)
+	if err != nil {
+		return Route{}, false, err
+	}
+	defer unlock()
+	routes, err := s.Read()
+	if err != nil {
+		return Route{}, false, err
+	}
+	route, ok := routes[box]
+	if !ok {
+		return Route{}, false, nil
+	}
+	delete(routes, box)
+	return route, true, s.Save(routes)
+}

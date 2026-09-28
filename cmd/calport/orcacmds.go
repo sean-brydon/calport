@@ -14,11 +14,15 @@ const orcaUsage = `Usage:
   calport orca serve BOX          Install and start the runtime unit on the box
   calport orca connect BOX        Serve if needed, then tunnel it and pair this computer
   calport orca status BOX         Report whether the paired runtime is reachable
+  calport orca disconnect BOX     Forget this computer's pairing with that box
   calport orca exec BOX -- ARGS   Run an orca command against that box's runtime
 
 connect is the whole flow; serve exists for running a runtime without pairing
-to it from here. Orca stores the pairing credential; calport stores only the
-route and the runtime's identity.
+to it from here. disconnect is the way out of a pairing that stopped working:
+it drops the route and the tunnel so connect can start over, on a fresh port.
+
+Orca stores the pairing credential; calport stores only the route and the
+runtime's identity.
 `
 
 func orcaCommand(l laptop, args []string) error {
@@ -50,6 +54,24 @@ func orcaCommand(l laptop, args []string) error {
 			return err
 		}
 		fmt.Printf("Orca on this computer now reaches %s at ws://127.0.0.1:%d.\n", boxName, route.LocalPort)
+		return nil
+	case "disconnect":
+		res, err := conn.Disconnect(ctx, boxName)
+		if err != nil {
+			return err
+		}
+		if !res.HadRoute && !res.RemovedForward {
+			fmt.Printf("%s was not paired with this computer's Orca; nothing to drop.\n", boxName)
+			return nil
+		}
+		if res.HadRoute {
+			fmt.Printf("Dropped the saved route for %s, including its pinned port %d.\n", boxName, res.Route.LocalPort)
+		}
+		if res.RemovedForward {
+			fmt.Printf("Removed the tunnel that carried it.\n")
+		}
+		fmt.Printf("Still there: the %s unit on %s, which keeps serving (calport unit rm %s/%s stops it), and an Orca environment named %s, if Orca paired one - remove that in the Orca app.\n", orca.UnitName, boxName, boxName, orca.UnitName, boxName)
+		fmt.Printf("Run calport orca connect %s to pair again; it takes a fresh port.\n", boxName)
 		return nil
 	case "status":
 		routes, err := conn.Store.Read()

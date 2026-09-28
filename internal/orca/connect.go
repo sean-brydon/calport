@@ -10,8 +10,10 @@ import (
 	"github.com/sean-brydon/calport/internal/box"
 )
 
-// unitName is the managed unit the runtime runs as on every box.
-const unitName = "calport-orca"
+// UnitName is the managed unit the runtime runs as on every box. It is
+// exported so a caller can name it when telling someone what calport left
+// running on the box.
+const UnitName = "calport-orca"
 
 // readyWait bounds how long a runtime has to report that it is ready.
 const readyWait = 60 * time.Second
@@ -63,7 +65,7 @@ func (c *Connector) Serve(ctx context.Context, boxName string) (Ready, error) {
 	// it as boundEndpoint, which is authoritative. If something already holds
 	// that port the unit fails to start, which is the right outcome.
 	if _, err := c.Units.AddUnit(ctx, box.UnitRequest{
-		Name:    unitName,
+		Name:    UnitName,
 		Program: "orca",
 		Args:    []string{"serve", "--json", "--pairing-address", fmt.Sprintf("ws://127.0.0.1:%d", port)},
 	}); err != nil {
@@ -72,7 +74,7 @@ func (c *Connector) Serve(ctx context.Context, boxName string) (Ready, error) {
 	deadline := time.Now().Add(readyWait)
 	var last error
 	for {
-		log, err := c.Units.UnitLog(ctx, unitName, readLimit)
+		log, err := c.Units.UnitLog(ctx, UnitName, readLimit)
 		if err == nil {
 			ready, perr := ParseReady(log, port)
 			if perr == nil {
@@ -83,7 +85,7 @@ func (c *Connector) Serve(ctx context.Context, boxName string) (Ready, error) {
 			last = err
 		}
 		if time.Now().After(deadline) {
-			return Ready{}, fmt.Errorf("the runtime on %s did not report that it is ready within %v: %w; see: calport unit get %s/%s", boxName, readyWait, last, boxName, unitName)
+			return Ready{}, fmt.Errorf("the runtime on %s did not report that it is ready within %v: %w; see: calport unit get %s/%s", boxName, readyWait, last, boxName, UnitName)
 		}
 		select {
 		case <-ctx.Done():
@@ -210,4 +212,48 @@ func (c *Connector) environment(ctx context.Context, boxName string, ready Ready
 		return "", "", err
 	}
 	return id, id, nil
+}
+
+// Disconnected reports what Disconnect dropped, so the caller can say what is
+// gone and what is still there.
+type Disconnected struct {
+	Route          Route
+	HadRoute       bool
+	RemovedForward bool
+}
+
+// Disconnect forgets a box's pairing on this laptop: the saved route and the
+// pinned tunnel. It is the way out of a pairing that cannot be repaired in
+// place - a runtime whose identity was regenerated, or a port pinned before
+// anything paired that this laptop cannot listen on - because both are held in
+// the route, and Connect reuses the route rather than replacing it.
+//
+// It deliberately leaves the box's unit running and the local Orca environment
+// paired. Neither is calport's to throw away: the unit may be serving other
+// work, and the environment is Orca's record, holding the credential calport
+// never sees. The caller is told what remains.
+func (c *Connector) Disconnect(ctx context.Context, boxName string) (Disconnected, error) {
+	existing, err := c.Forwards.Forwards(ctx)
+	if err != nil {
+		return Disconnected{}, err
+	}
+	out := Disconnected{}
+	for _, f := range existing {
+		if f.Pin != Pin(boxName) {
+			continue
+		}
+		if _, err := c.Forwards.RemoveForward(ctx, f.ID); err != nil {
+			return Disconnected{}, err
+		}
+		out.RemovedForward = true
+	}
+	// The route is dropped last: while the forward is still up, a rerun can
+	// still find and clear it. A route dropped first would orphan the forward
+	// under a pin nothing points at any more.
+	route, had, err := c.Store.Forget(boxName)
+	if err != nil {
+		return Disconnected{}, err
+	}
+	out.Route, out.HadRoute = route, had
+	return out, nil
 }
