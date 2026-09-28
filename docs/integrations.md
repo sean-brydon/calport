@@ -93,10 +93,12 @@ solves nor worsens.
 
 Orca is the one that holds the pairing credential, once it has paired;
 calport itself only ever stores the route (the runtime's identity and the
-local port it tunnels to) in `orca.json` under its state directory. That
-credential is never printed by any `calport orca` command and never belongs
-in a command, a config file, or a chat message — pairing happens once, inside
-Orca.
+local port it tunnels to) in `orca.json` under its state directory. calport
+reads the credential out of the runtime's log and hands it straight to the
+local Orca CLI on this computer, once, to pair — `orca environment add` takes
+it only as a flag, so for that one call it is on this machine's process list
+while the call runs. calport never stores it, never sends it anywhere else,
+and no `calport orca` command prints it, logs it, or puts it in an error.
 
 A box's local port is fixed the first time it pairs, because the pairing
 code the local Orca app stores embeds that port. Reconnecting (`calport orca
