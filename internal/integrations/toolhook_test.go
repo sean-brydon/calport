@@ -43,6 +43,7 @@ func TestTranslate(t *testing.T) {
 func TestTranslateNeverCopiesContent(t *testing.T) {
 	for _, tc := range [][3]string{
 		{"claude", "Notification", `{"message":"SECRET-TEXT","transcript_path":"/SECRET-TEXT","cwd":"/w"}`},
+		{"claude", "UserPromptSubmit", `{"prompt":"SECRET-TEXT","cwd":"/w","session_id":"s"}`},
 		{"codex", "notify", `{"type":"agent-turn-complete","input-messages":["SECRET-TEXT"],"last-assistant-message":"SECRET-TEXT"}`},
 		{"cursor", "stop", `{"prompt":"SECRET-TEXT","workspace_roots":["/w"]}`},
 	} {

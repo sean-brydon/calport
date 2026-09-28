@@ -130,6 +130,14 @@ func (a *Agent) api(stop context.CancelFunc) http.Handler {
 	mux.HandleFunc("GET /v1/networks", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, a.cfg.Networks.List(r.Context()))
 	})
+	mux.HandleFunc("GET /v1/networks/{name}/peers", func(w http.ResponseWriter, r *http.Request) {
+		peers, err := a.cfg.Networks.Peers(r.Context(), r.PathValue("name"))
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, peers)
+	})
 	// Login streams the sign-in URL, then the connected network, as NDJSON.
 	mux.HandleFunc("POST /v1/networks/{name}/login", func(w http.ResponseWriter, r *http.Request) {
 		rc := http.NewResponseController(w)

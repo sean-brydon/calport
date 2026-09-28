@@ -50,6 +50,7 @@ Reaching services
   calport forward <box> <ports> [--json]   Forward local ports: 3000, 8080:3000, 3000-3005
   calport forwards [--json]                List forwards
   calport unforward <id>                   Stop and forget a forward
+  calport discover [--network NET]            Machines on the tailnet that could be boxes
   calport kit install BOX/LOCATION            Set up Cal.com worktrees on a box: own port, database and URL each
   calport route add '*.x.localhost' BOX PORT  Send every matching host to a box port, Host unchanged
   calport routes [--json]                  List routes (calport route rm PATTERN removes one)
@@ -130,6 +131,8 @@ func run(args []string) error {
 		return routeCommand(l, rest)
 	case "kit":
 		return kitCommand(l, rest)
+	case "discover":
+		return discover(l, rest)
 	case "routes":
 		return listRoutes(l, rest)
 	case "network":

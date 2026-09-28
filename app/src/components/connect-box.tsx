@@ -10,7 +10,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toastManager } from "@/components/ui/toast";
-import { calport, type Network } from "@/lib/calport";
+import { Badge } from "@/components/ui/badge";
+import { useLoad } from "@/hooks/use-calport";
+import { calport, type Machine, type Network } from "@/lib/calport";
+import { sshTarget } from "@/lib/ssh-target";
+import { cn } from "@/lib/utils";
 import { boxName } from "@/lib/format";
 
 interface ConnectBoxProps {
@@ -140,11 +144,19 @@ export function ConnectBox({ networks, onConnected, onNetworksChanged }: Connect
 }
 
 function SSHForm({ networks, network, setNetwork, onNetworksChanged, onConnected }: FormProps) {
+  const machines = useLoad(() => calport.discover(network || undefined), [network]);
+  const [picked, setPicked] = useState<Machine>();
+  const [manual, setManual] = useState(false);
+  const [user, setUser] = useState<string>();
   const [host, setHost] = useState("");
   const [name, setName] = useState("");
   const [lines, setLines] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const login = user ?? machines.data?.user ?? "";
+  const target = manual || !picked ? host.trim() : sshTarget(picked, login, network);
+  const fallbackName = manual ? "" : (picked?.name ?? "");
+
   return (
     <form
       className="flex flex-col gap-4"
@@ -154,19 +166,20 @@ function SSHForm({ networks, network, setNetwork, onNetworksChanged, onConnected
         setError(undefined);
         setLines([]);
         let paired = "";
+        const chosenName = boxName(name) || boxName(fallbackName);
         try {
           await calport.addSSHStreaming(
-            host.trim(),
+            target,
             (line) => {
               setLines((l) => [...l, line]);
               const m = line.match(/^Paired with (\S+)/);
               if (m) paired = m[1];
             },
-            boxName(name) || undefined,
+            chosenName || undefined,
             network || undefined,
           );
-          toastManager.add({ title: `Connected ${paired || host}`, type: "success" });
-          onConnected(paired || boxName(name) || host);
+          toastManager.add({ title: `Connected ${paired || target}`, type: "success" });
+          onConnected(paired || chosenName || target);
         } catch (err) {
           setError(errorText(err));
         } finally {
@@ -176,28 +189,123 @@ function SSHForm({ networks, network, setNetwork, onNetworksChanged, onConnected
     >
       <p className="text-muted-foreground text-sm">
         Calport uses your SSH access once to install its small daemon on the box, then pairs with it. After that it
-        never needs SSH again. The daemon only listens on the box's tailnet address.
+        never needs SSH again. Keys from your SSH agent, like 1Password, work as usual; a new host's fingerprint or a
+        password is asked for once.
       </p>
-      <p className="text-muted-foreground text-sm">
-        Keys from your SSH agent, like 1Password, work as usual. If the box is new to this computer, or asks for a
-        password, Calport shows you its fingerprint or asks for the password, once.
-      </p>
-      <Field>
-        <FieldLabel>Host</FieldLabel>
-        <Input required value={host} placeholder="dev-alex or alex@203.0.113.5" className="font-mono" onChange={(e) => setHost(e.target.value)} />
-        <FieldDescription>Anything you can type after <code>ssh</code>.</FieldDescription>
-      </Field>
-      <BoxNameField value={name} onChange={setName} />
-      <NetworkSelect networks={networks} value={network} onChange={setNetwork} onNetworksChanged={onNetworksChanged} />
+      <NetworkSelect
+        networks={networks}
+        value={network}
+        onChange={(v) => {
+          setNetwork(v);
+          setPicked(undefined);
+        }}
+        onNetworksChanged={onNetworksChanged}
+      />
+      {!manual && (
+        <MachinePicker
+          machines={machines.data?.machines ?? []}
+          loading={machines.loading && !machines.data}
+          error={machines.error}
+          picked={picked}
+          onPick={(m) => {
+            setPicked(m);
+            setName("");
+          }}
+          onManual={() => setManual(true)}
+        />
+      )}
+      {manual && (
+        <Field>
+          <FieldLabel>Host</FieldLabel>
+          <Input required value={host} placeholder="dev-alex or alex@203.0.113.5" className="font-mono" onChange={(e) => setHost(e.target.value)} />
+          <FieldDescription>
+            Anything you can type after <code>ssh</code>.{" "}
+            <button type="button" className="underline underline-offset-4" onClick={() => setManual(false)}>
+              Pick from the tailnet
+            </button>
+          </FieldDescription>
+        </Field>
+      )}
+      {!manual && picked && (
+        <Field>
+          <FieldLabel>Username on {picked.name}</FieldLabel>
+          <Input value={login} className="font-mono" onChange={(e) => setUser(e.target.value)} />
+          <FieldDescription>
+            Connects as <code className="font-mono">{target}</code>
+          </FieldDescription>
+        </Field>
+      )}
+      {(manual || picked) && <BoxNameField value={name || (manual ? "" : fallbackName)} onChange={setName} />}
       <Progress lines={lines} busy={busy} />
       {error && <p className="text-destructive-foreground text-sm">{error}</p>}
       <div>
-        <Button type="submit" disabled={busy || !host}>
+        <Button type="submit" disabled={busy || !target}>
           {busy && <Spinner />}
           Install and pair
         </Button>
       </div>
     </form>
+  );
+}
+
+interface MachinePickerProps {
+  machines: Machine[];
+  loading: boolean;
+  error?: string;
+  picked?: Machine;
+  onPick: (m: Machine) => void;
+  onManual: () => void;
+}
+
+function MachinePicker({ machines, loading, error, picked, onPick, onManual }: MachinePickerProps) {
+  const [query, setQuery] = useState("");
+  const shown = machines.filter((m) => !query || m.name.toLowerCase().includes(query.toLowerCase()) || m.ip.includes(query));
+  return (
+    <Field>
+      <FieldLabel>Machine</FieldLabel>
+      {machines.length > 6 && <Input value={query} placeholder="Search machines" onChange={(e) => setQuery(e.target.value)} />}
+      {loading ? (
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Spinner /> Looking for machines…
+        </div>
+      ) : error ? (
+        <p className="text-muted-foreground text-sm">{error}</p>
+      ) : (
+        <ul role="listbox" aria-label="Machines" className="flex max-h-56 w-full flex-col divide-y overflow-y-auto overscroll-contain rounded-lg border">
+          {shown.map((m) => {
+            const selectable = m.online && !m.box;
+            return (
+              <li key={m.ip}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={picked?.ip === m.ip}
+                  disabled={!selectable}
+                  onClick={() => onPick(m)}
+                  className={cn(
+                    "flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent",
+                    picked?.ip === m.ip && "bg-accent",
+                  )}
+                >
+                  <span className="flex-1 truncate font-medium">{m.name}</span>
+                  <span className="w-32 shrink-0 text-right font-mono text-muted-foreground text-xs">{m.ip}</span>
+                  <span className="flex w-16 shrink-0 justify-end">
+                    {m.box ? <Badge variant="outline">paired</Badge> : !m.online ? <Badge variant="secondary">offline</Badge> : m.os === "macOS" && <Badge variant="outline">macOS</Badge>}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+          {shown.length === 0 && <li className="px-3 py-2 text-muted-foreground text-sm">No machines{query ? " match" : " found"}.</li>}
+        </ul>
+      )}
+      <FieldDescription>
+        Not listed?{" "}
+        <button type="button" className="underline underline-offset-4" onClick={onManual}>
+          Enter a host
+        </button>
+      </FieldDescription>
+    </Field>
   );
 }
 

@@ -54,6 +54,20 @@ export interface Location {
   scripts: Scripts;
 }
 
+export interface Machine {
+  name: string;
+  dns_name?: string;
+  ip: string;
+  os: string;
+  online: boolean;
+  box?: string;
+}
+
+export interface Discovery {
+  user: string;
+  machines: Machine[];
+}
+
 export interface Usage {
   total: number;
   used: number;
@@ -266,6 +280,7 @@ export const calport = {
 
   status: () => json<Status>(["status"]),
   networks: () => json<Network[]>(["networks"]),
+  discover: (network?: string) => json<Discovery>(["discover", ...(network ? ["--network", network] : [])]),
   locations: (box: string) => json<Location[]>(["locations", box]),
   ports: (box: string) => json<Port[]>(["ports", box]),
   shares: (box: string) => json<Share[]>(["shares", box]),

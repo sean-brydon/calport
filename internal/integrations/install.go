@@ -31,7 +31,9 @@ func InstallClaudeHooks(settingsPath, bin string) (bool, error) {
 	return editJSON(settingsPath, func(root map[string]any) bool {
 		hooks := object(root, "hooks")
 		changed := false
-		for _, event := range []string{"Stop", "Notification"} {
+		// SessionStart and UserPromptSubmit mark the agent busy again, so a
+		// "needs you" state clears once someone answers it.
+		for _, event := range []string{"Stop", "Notification", "SessionStart", "UserPromptSubmit"} {
 			command := hookCommand(bin, "claude", event)
 			list, _ := hooks[event].([]any)
 			if containsCommand(list, command) {

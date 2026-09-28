@@ -56,6 +56,21 @@ func TestEnvDescribesTheEventAndStampsTheOrigin(t *testing.T) {
 	}
 }
 
+// exec keeps the last of duplicate variables, so data named like a fixed
+// variable could otherwise replace the origin that stops hook loops.
+func TestEventDataCannotReplaceFixedVariables(t *testing.T) {
+	e := events.Event{Type: "agent.finished", Origin: "claude", Data: map[string]any{"origin": "calport", "event": "x.y", "path": "/w"}}
+	env := Env(e, "orca")
+	for _, bad := range []string{"CALPORT_ORIGIN=calport", "CALPORT_EVENT=x.y"} {
+		if slices.Contains(env, bad) {
+			t.Errorf("event data set %s: %v", bad, env)
+		}
+	}
+	if !slices.Contains(env, "CALPORT_ORIGIN=orca") || !slices.Contains(env, "CALPORT_PATH=/w") {
+		t.Errorf("env = %v", env)
+	}
+}
+
 func TestRunnerRunsMatchingHooksWithTheEventOnStdin(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out")

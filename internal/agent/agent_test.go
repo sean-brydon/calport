@@ -570,6 +570,8 @@ func (f *fakeNetworks) List(context.Context) []network.Info {
 
 func (f *fakeNetworks) Close() {}
 
+func (f *fakeNetworks) Peers(context.Context, string) ([]network.Peer, error) { return nil, nil }
+
 func TestABoxOnAnotherTailnetIsReachedThroughItsNetwork(t *testing.T) {
 	b := newBox(t)
 	dir := b.pairLaptop()

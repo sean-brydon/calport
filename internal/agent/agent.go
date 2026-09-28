@@ -68,6 +68,7 @@ type Networks interface {
 	Dial(ctx context.Context, name, addr string) (net.Conn, error)
 	Login(ctx context.Context, name string, onURL func(string)) (network.Info, error)
 	List(ctx context.Context) []network.Info
+	Peers(ctx context.Context, name string) ([]network.Peer, error)
 	Close()
 }
 

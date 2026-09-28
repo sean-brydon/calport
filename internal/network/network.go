@@ -169,25 +169,8 @@ func (m *Manager) Dial(ctx context.Context, name, addr string) (net.Conn, error)
 	if err != nil {
 		return nil, err
 	}
-	// A node that is still starting (just after the agent starts or the
-	// laptop wakes) is worth a short wait; one that needs a login is not.
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		i, err := m.info(ctx, name)
-		if err == nil && i.State == "Running" {
-			break
-		}
-		if err == nil && i.State == "NeedsLogin" {
-			return nil, fmt.Errorf("%w %s", ErrNeedsLogin, name)
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(250 * time.Millisecond):
-		}
+	if err := m.waitRunning(ctx, name); err != nil {
+		return nil, err
 	}
 	// A freshly started node reports Running a few seconds before it has a
 	// path to its peers, so early failures are retried; later ones are real.
@@ -200,6 +183,29 @@ func (m *Manager) Dial(ctx context.Context, name, addr string) (net.Conn, error)
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(time.Second):
+		}
+	}
+}
+
+// waitRunning gives a node that is still starting (just after the agent
+// starts or the laptop wakes) a short wait; one that needs a login gets none.
+func (m *Manager) waitRunning(ctx context.Context, name string) error {
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		i, err := m.info(ctx, name)
+		if err == nil && i.State == "Running" {
+			return nil
+		}
+		if err == nil && i.State == "NeedsLogin" {
+			return fmt.Errorf("%w %s", ErrNeedsLogin, name)
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
 		}
 	}
 }

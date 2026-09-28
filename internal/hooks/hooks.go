@@ -69,6 +69,10 @@ func Env(e events.Event, tool string) []string {
 		"CALPORT_EVENT_ORIGIN=" + e.Origin,
 		OriginEnv + "=" + origin,
 	}
+	reserved := map[string]bool{}
+	for _, kv := range env {
+		reserved[strings.SplitN(kv, "=", 2)[0]] = true
+	}
 	for k, v := range e.Data {
 		key := strings.ToUpper(strings.Map(func(r rune) rune {
 			if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
@@ -76,6 +80,11 @@ func Env(e events.Event, tool string) []string {
 			}
 			return '_'
 		}, k))
+		// Event data must not replace the variables above: the origin is
+		// what stops a hook from reacting to its own events.
+		if reserved["CALPORT_"+key] {
+			continue
+		}
 		env = append(env, fmt.Sprintf("CALPORT_%s=%v", key, v))
 	}
 	return env

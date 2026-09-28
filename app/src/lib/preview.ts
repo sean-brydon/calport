@@ -62,6 +62,16 @@ const fixtures: Record<string, unknown> = {
   ],
   // ?kit=none shows the kit offer; otherwise the box has the kit.
   kit: kitFixture(),
+  discover: {
+    user: "alex",
+    machines: [
+      { name: "devl", dns_name: "devl.example.ts.net", ip: "100.101.102.103", os: "linux", online: true, box: "devl" },
+      { name: "dev-sam", dns_name: "dev-sam.example.ts.net", ip: "100.64.12.8", os: "linux", online: true },
+      { name: "build-01", dns_name: "build-01.example.ts.net", ip: "100.64.12.9", os: "linux", online: true },
+      { name: "studio", dns_name: "studio.example.ts.net", ip: "100.64.12.20", os: "macOS", online: true },
+      { name: "old-staging", dns_name: "old-staging.example.ts.net", ip: "100.64.12.30", os: "linux", online: false },
+    ],
+  },
   stats: {
     hostname: "devl",
     uptime_s: 1_900_000,
