@@ -88,12 +88,26 @@ func (c *Client) AddWorktree(ctx context.Context, location string, req WorktreeR
 	return out, c.call(ctx, http.MethodPost, "/v1/locations/"+url.PathEscape(location)+"/worktrees", req, &out)
 }
 
+// RemoveOptions change how a worktree is removed. DeleteBranch is for
+// throwaway worktrees only; a person's branch outlives its worktree.
+type RemoveOptions struct {
+	Force        bool
+	DeleteBranch bool
+}
+
 // RemoveWorktree removes a worktree, or starts archiving it: archive is the
 // script the box runs first, removing the worktree only if it succeeds.
-func (c *Client) RemoveWorktree(ctx context.Context, location, name string, force bool) (archive string, err error) {
+func (c *Client) RemoveWorktree(ctx context.Context, location, name string, opts RemoveOptions) (archive string, err error) {
 	path := "/v1/locations/" + url.PathEscape(location) + "/worktrees/" + url.PathEscape(name)
-	if force {
-		path += "?force=1"
+	q := url.Values{}
+	if opts.Force {
+		q.Set("force", "1")
+	}
+	if opts.DeleteBranch {
+		q.Set("delete_branch", "1")
+	}
+	if len(q) > 0 {
+		path += "?" + q.Encode()
 	}
 	var out struct {
 		Archive string `json:"archive"`

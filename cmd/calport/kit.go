@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,6 +18,9 @@ import (
 func kitCommand(l laptop, args []string) error {
 	if len(args) > 0 && args[0] == "check" {
 		return kitCheck(l, args[1:])
+	}
+	if len(args) > 0 && args[0] == "reclaim" {
+		return kitReclaim(l, args[1:])
 	}
 	if len(args) > 0 && args[0] == "tools" {
 		return kitTools(l, args[1:])
@@ -101,3 +105,44 @@ func printKit(res box.KitResult, boxName, target string) {
 	}
 	fmt.Printf("\nSo worktrees made in Orca, Cursor, Codex or Superset are set up too, run:\n  calport kit tools %s --setup\n", target)
 }
+
+// kitReclaim handles `calport kit reclaim BOX [--dry-run] [--all] [--json]`.
+func kitReclaim(l laptop, args []string) error {
+	var opts kit.ReclaimOptions
+	fs, asJSON, err := flags("kit reclaim", args, func(fs *flag.FlagSet) {
+		fs.BoolVar(&opts.DryRun, "dry-run", false, "only report what would be freed")
+		fs.BoolVar(&opts.All, "all", false, "skip the grace period that lets a restored worktree keep its database")
+	})
+	if err != nil || fs.NArg() != 1 {
+		return errors.New("usage: calport kit reclaim BOX [--dry-run] [--all]")
+	}
+	wc, err := l.boxClient(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	r, err := box.NewClient(wc).Reclaim(context.Background(), opts)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return printJSON(r)
+	}
+	verb := "Freed"
+	if r.DryRun {
+		verb = "Would free"
+	}
+	for _, w := range r.Reclaimed {
+		fmt.Printf("%s %s  %s (port %d, %s)\n", verb, w.Host, w.Path, w.Port, gib(w.Bytes))
+	}
+	for _, t := range r.Templates {
+		fmt.Printf("%s snapshot template %s (%s)\n", verb, t.Name, gib(t.Bytes))
+	}
+	fmt.Printf("%s %s in total.", verb, gib(r.Bytes))
+	if n := len(r.Waiting); n > 0 {
+		fmt.Printf(" %d more worktree(s) with their folder gone keep their database until their grace period ends; --all frees them now.", n)
+	}
+	fmt.Println()
+	return nil
+}
+
+func gib(b int64) string { return fmt.Sprintf("%.1f GiB", float64(b)/(1<<30)) }

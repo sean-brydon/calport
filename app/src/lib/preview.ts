@@ -155,6 +155,8 @@ export async function previewRun(args: string[]): Promise<string> {
   if (args[0] === "url") return `http://${args[2]}.${args[1]}.localhost:1355/\n`;
   if (args[0] === "share") return JSON.stringify({ id: "b71c02aa", port: Number(args[2]), url: "https://quiet-river-demo.trycloudflare.com", started: new Date().toISOString(), state: "live" });
   if (args[0] === "kit" && args[1] === "tools") return JSON.stringify(args.includes("--setup") ? setUpKitToolsFixture(args) : kitToolsFixture());
+  if (args[0] === "kit" && args[1] === "reclaim")
+    return JSON.stringify({ dry_run: args.includes("--dry-run"), reclaimed: [{ key: "a1", host: "old-a1b2c3.devl.cal.localhost", path: "/home/alex/orca/workspaces/cal/old", port: 3104, bytes: 1_300_000_000 }], templates: [{ name: "caltpl_x", bytes: 900_000_000 }], waiting: [], bytes: 2_200_000_000 });
   if (args[0] === "kit" && args[1] === "install") return JSON.stringify({ kit: { ...kitFixture(), installed: true, pattern: "*.devl.cal.localhost", notes: [] }, routed: true });
   const k = key(args);
   if (k in fixtures) return JSON.stringify(fixtures[k]);

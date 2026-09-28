@@ -54,6 +54,7 @@ Reaching services
   calport kit install BOX/LOCATION            Set up Cal.com worktrees on a box: own port, database and URL each
   calport kit tools BOX/LOCATION [--setup]    Make Orca, Cursor, Codex, Superset (and Herdr) run the kit's hooks
   calport kit check BOX/LOCATION              Make a throwaway worktree, check setup, URL and archive, end to end
+  calport kit reclaim BOX [--dry-run] [--all] Free databases, ports and services of worktrees whose folder is gone
   calport route add '*.x.localhost' BOX PORT  Send every matching host to a box port, Host unchanged
   calport routes [--json]                  List routes (calport route rm PATTERN removes one)
 

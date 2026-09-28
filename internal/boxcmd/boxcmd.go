@@ -235,7 +235,7 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		if !ok {
 			return usageErr("worktree rm LOC/NAME [--force]")
 		}
-		archive, err := c.RemoveWorktree(ctx, loc, name, *force)
+		archive, err := c.RemoveWorktree(ctx, loc, name, box.RemoveOptions{Force: *force})
 		if err != nil {
 			return err
 		}

@@ -111,7 +111,7 @@ func kitCheck(l laptop, args []string) error {
 		}
 		once.Do(func() {
 			step("Archiving %s…", name)
-			if _, err := c.RemoveWorktree(context.Background(), location, name, true); err != nil {
+			if _, err := c.RemoveWorktree(context.Background(), location, name, box.RemoveOptions{Force: true, DeleteBranch: true}); err != nil {
 				step("✗ archiving failed: %v", err)
 			}
 		})
@@ -206,6 +206,18 @@ func kitCheck(l laptop, args []string) error {
 		time.Sleep(3 * time.Second)
 	}
 	step("✓ Archived: the app stopped and its URL no longer answers")
+	deadline = time.Now().Add(2 * time.Minute)
+	for {
+		s, err := c.Kit(ctx)
+		if err == nil && !slices.ContainsFunc(s.Worktrees, func(w kit.Worktree) bool { return w.Path == wt.Path }) {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("✗ %s's database, port and services were not reclaimed after it was removed", name)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	step("✓ Reclaimed: its database, port and services are freed, and its branch deleted")
 	fmt.Printf("\nAll good: %s creates, serves and archives Cal.com worktrees end to end.\n", boxName)
 	return nil
 }

@@ -109,6 +109,14 @@ export interface KitStatus {
   worktrees?: KitWorktree[];
 }
 
+export interface ReclaimReport {
+  dry_run: boolean;
+  reclaimed: { key: string; host: string; path: string; database?: string; port?: number; bytes: number }[];
+  templates: { name: string; bytes: number }[];
+  waiting: { key: string; host: string; path: string; reclaim_after: number }[];
+  bytes: number;
+}
+
 export interface KitInstall {
   kit: KitStatus & { notes?: string[]; hooks_from?: string };
   routed: boolean;
@@ -311,6 +319,8 @@ export const calport = {
   services: (box: string) => json<Service[]>(["services", box]),
   kit: (box: string) => json<KitStatus>(["kit", box]),
   stats: (box: string) => json<BoxStats>(["stats", box]),
+  reclaim: (box: string, opts: { dryRun?: boolean; all?: boolean }) =>
+    json<ReclaimReport>(["kit", "reclaim", box, ...(opts.dryRun ? ["--dry-run"] : []), ...(opts.all ? ["--all"] : [])]),
   installKit: (box: string, location: string) => json<KitInstall>(["kit", "install", `${box}/${location}`]),
   kitTools: (box: string, location: string) => json<KitTools>(["kit", "tools", `${box}/${location}`]),
   // setUpKitTools with no tools sets up every missing one that is not opt-in.

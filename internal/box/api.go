@@ -84,6 +84,7 @@ func (b *Box) Mount(s *wire.Server) {
 	route("DELETE /v1/shares/{id}", b.removeShare)
 	route("GET /v1/stats", b.handleStats)
 	route("GET /v1/kit", b.kitStatus)
+	route("POST /v1/kit/reclaim", b.handleReclaim)
 	route("POST /v1/kit", b.installKit)
 	route("GET /v1/kit/tools", b.kitTools)
 	route("POST /v1/kit/tools", b.setUpKitTools)
@@ -286,6 +287,21 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// Only throwaway worktrees ask for their branch to go too (kit check).
+	var branch string
+	if r.URL.Query().Get("delete_branch") == "1" {
+		for _, wt := range loc.Worktrees {
+			if wt.Path == dir && !wt.Main {
+				branch = wt.Branch
+			}
+		}
+	}
+	removed := func(ctx context.Context) {
+		if branch != "" {
+			git(ctx, "-C", loc.Path, "branch", "-D", branch)
+		}
+		b.reclaimRemoved(loc, dir)
+	}
 	// A worktree with an archive script is torn down in the background: the
 	// script may take minutes, and removal only follows if it succeeds.
 	if (!OrcaManaged(dir) || !b.toolRunsKitHooks(r.Context(), "orca", loc)) && loc.Scripts.Archive != "" {
@@ -294,6 +310,7 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 			if err := b.Locations.RemoveWorktree(context.Background(), location, name, force); err != nil {
 				return err
 			}
+			removed(context.Background())
 			b.Events.Publish(events.Event{Type: "worktree.removed", Box: b.Name, Origin: from, Data: map[string]any{"location": location, "name": name, "path": dir}})
 			return nil
 		})
@@ -304,6 +321,7 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 	if err := b.Locations.RemoveWorktree(r.Context(), location, name, force); err != nil {
 		return err
 	}
+	removed(context.WithoutCancel(r.Context()))
 	b.publish(r, "worktree.removed", map[string]any{"location": location, "name": name, "path": dir})
 	writeJSON(w, map[string]string{"removed": name})
 	return nil

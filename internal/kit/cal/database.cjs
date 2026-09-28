@@ -14,7 +14,9 @@ if (action === 'env-fingerprint') {
  const values=files.map(file=>fs.existsSync(file)?req('dotenv').parse(fs.readFileSync(file)):{});
  process.stdout.write(crypto.createHash('sha256').update(JSON.stringify(values.map(v=>Object.entries(v).sort()))).digest('hex'));process.exit(0);
 }
-if (action !== 'create' || !/^calwt_[a-f0-9]{12}$/.test(name)) throw new Error('Invalid database request');
+const worktreeDB = n => /^calwt_[a-f0-9]{12}$/.test(n);
+if (!['create','drop','sizes','prune-templates'].includes(action)) throw new Error('Invalid database request');
+if ((action === 'create' || action === 'drop') && !worktreeDB(name)) throw new Error('Invalid database name');
 const u = new URL(env.DATABASE_DIRECT_URL || env.DATABASE_URL);
 if (!['localhost','127.0.0.1','[::1]'].includes(u.hostname)) throw new Error('Expected a local development PostgreSQL server');
 u.search = '';
@@ -48,6 +50,33 @@ function pgTool(tool, database, args, file, output) {
 function canSnapshot() {
  return Boolean(config.postgres_container) || (process.env.PATH || '').split(':').some(dir => dir && fs.existsSync(path.join(dir, 'pg_dump')));
 }
+// The template the last snapshot clone used; any other is from older migrations.
+const currentTemplateFile = path.join(__dirname, 'current-template');
+async function drop(c, database) {
+ try { await c.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`); }
+ catch { await c.query(`DROP DATABASE IF EXISTS "${database}"`); } // PostgreSQL before 13
+}
+async function housekeeping() {
+ const c=client('postgres'); await c.connect();
+ try {
+  if (action === 'drop') { await drop(c, name); console.log(JSON.stringify({dropped:name})); return; }
+  if (action === 'sizes') {
+   const names=(name||'').split(',').filter(worktreeDB);
+   const rows=(await c.query('SELECT datname, pg_database_size(datname)::bigint AS bytes FROM pg_database WHERE datname = ANY($1)',[names])).rows;
+   console.log(JSON.stringify(Object.fromEntries(rows.map(r=>[r.datname,Number(r.bytes)])))); return;
+  }
+  // prune-templates keeps the template the last clone used or, with no
+  // record of one yet, the newest.
+  await c.query("SELECT pg_advisory_lock(719245831)");
+  const rows=(await c.query("SELECT datname, oid::bigint AS oid, pg_database_size(datname)::bigint AS bytes FROM pg_database WHERE datname LIKE 'caltpl\\_%' ORDER BY oid::bigint")).rows;
+  const recorded=fs.existsSync(currentTemplateFile)?fs.readFileSync(currentTemplateFile,'utf8').trim():'';
+  const current=rows.some(r=>r.datname===recorded)?recorded:(rows.length?rows[rows.length-1].datname:'');
+  const stale=rows.filter(r=>r.datname!==current);
+  if (name !== 'dry-run') for (const r of stale) { await c.query(`ALTER DATABASE "${r.datname}" IS_TEMPLATE false`).catch(()=>{}); await drop(c, r.datname); }
+  console.log(JSON.stringify({templates:stale.map(r=>({name:r.datname,bytes:Number(r.bytes)}))}));
+ } finally { await c.end(); }
+}
+if (action !== 'create') { housekeeping().catch(e=>{console.error(e.message);process.exit(1)}); return; }
 (async () => {
  const c=client('postgres'); await c.connect(); let source;
  try {
@@ -86,6 +115,7 @@ function canSnapshot() {
   }
   await source.query('COMMIT');
   await c.query(`CREATE DATABASE "${name}" TEMPLATE "${template}"`);
+  fs.writeFileSync(currentTemplateFile, template);
   await c.query(`COMMENT ON DATABASE "${name}" IS 'cal-worktree snapshot'`);
   console.log(JSON.stringify({cloned:true,template}));
  } finally {if(source)await source.end();await c.end();}

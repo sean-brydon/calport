@@ -219,7 +219,7 @@ func serve(b boxHome, args []string) error {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	(&box.Box{
+	bx := &box.Box{
 		Name:         hostname,
 		Locations:    locations,
 		Sessions:     sessions,
@@ -235,7 +235,10 @@ func serve(b boxHome, args []string) error {
 			Fingerprint:   id.Fingerprint().String(),
 			BeforeRestart: func() { shares.StopAll(); ln.Close() },
 		},
-	}).Mount(s)
+	}
+	bx.Mount(s)
+	// Worktrees whose folder is gone keep a database and port until swept.
+	go bx.SweepKit(ctx, time.Hour)
 
 	os.Remove(b.socket())
 	local, err := net.Listen("unix", b.socket())

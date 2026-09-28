@@ -250,6 +250,70 @@ def archive(key=None):
         subprocess.run(['systemctl','--user','disable','--now',unit(key)],env=ENV,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         print('Stopped '+record['host']+'; database and URL retained for reopening.')
 
+RETENTION_DAYS=7
+
+def reclaim(args):
+    """Free what worktrees whose folder is gone still hold: database, port and
+    URL record, services and logs. A folder removed through calport is
+    reclaimed at once (--path); one that vanished otherwise, as when Orca archives it,
+    waits RETENTION_DAYS so restoring it keeps its database and URL."""
+    dry='--dry-run' in args
+    now_paths={os.path.realpath(args[i+1]) for i,a in enumerate(args[:-1]) if a=='--path'}
+    days=RETENTION_DAYS
+    if '--retention-days' in args: days=float(args[args.index('--retention-days')+1])
+    now=time.time()
+    plan,waiting=[],[]
+    with (BASE/'registry.lock').open('w') as registry:
+        fcntl.flock(registry,fcntl.LOCK_EX)
+        for p in sorted(ROUTES.glob('*.json')):
+            key=p.stem
+            if not re.fullmatch('[a-f0-9]{12}',key): continue
+            r=json.loads(p.read_text())
+            if pathlib.Path(r['path']).exists():
+                if r.pop('gone_since',None) is not None and not dry: save(p,r)
+                continue
+            if os.path.realpath(r['path']) not in now_paths:
+                gone=r.get('gone_since')
+                if gone is None:
+                    r['gone_since']=gone=now
+                    if not dry: save(p,r)
+                if now-gone<days*86400:
+                    waiting.append(dict(key=key,host=r['host'],path=r['path'],reclaim_after=gone+days*86400))
+                    continue
+            plan.append((key,r))
+        sizes={}
+        names=','.join(r.get('database','') for _,r in plan)
+        if names:
+            try: sizes=json.loads(subprocess.check_output([NODE,str(BASE/'database.cjs'),'sizes',CONFIG['root'],names],env=ENV))
+            except subprocess.CalledProcessError: pass
+        done=[]
+        units=pathlib.Path.home()/'.config/systemd/user'
+        for key,r in plan:
+            item=dict(key=key,host=r['host'],path=r['path'],database=r.get('database'),port=r.get('port'),bytes=sizes.get(r.get('database'),0))
+            if dry:
+                done.append(item);continue
+            with (BASE/(key+'.lock')).open('w') as lock:
+                try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                except BlockingIOError: continue # setup or archive is running for it
+                for name in ('cal-studio-'+key+'.service',unit(key)):
+                    subprocess.run(['systemctl','--user','disable','--now',name],env=ENV,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                    (units/name).unlink(missing_ok=True)
+                if r.get('database'):
+                    subprocess.run([NODE,str(BASE/'database.cjs'),'drop',CONFIG['root'],r['database']],env=ENV,check=True,stdout=subprocess.DEVNULL)
+                (ROUTES/(key+'.json')).unlink()
+                for f in BASE.glob(key+'*'):
+                    if f.is_file(): f.unlink(missing_ok=True)
+            done.append(item)
+        if done and not dry:
+            subprocess.run(['systemctl','--user','daemon-reload'],env=ENV,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        templates=[]
+        try:
+            out=subprocess.check_output([NODE,str(BASE/'database.cjs'),'prune-templates',CONFIG['root'],'dry-run' if dry else 'apply'],env=ENV)
+            templates=json.loads(out).get('templates',[])
+        except (subprocess.CalledProcessError,ValueError): pass
+    return dict(dry_run=dry,reclaimed=done,templates=templates,waiting=waiting,
+                bytes=sum(d['bytes'] for d in done)+sum(t['bytes'] for t in templates))
+
 def studio(key):
     if not re.fullmatch('[a-f0-9]{12}',key): raise RuntimeError('Invalid worktree')
     with (BASE/(key+'.lock')).open('w') as lock:
@@ -331,12 +395,20 @@ try:
         print('Logs: http://'+r['host']+'/__worktree/logs',flush=True)
         print('Studio: http://'+r['host']+'/__worktree/studio',flush=True)
         os.execvp('python3',['python3',str(BASE/'color-logs.py'),'journalctl','--user','-u',unit(key),'-n','100','-f','--no-pager','--all'])
+    elif action=='reclaim':
+        report=reclaim(sys.argv[2:])
+        if '--json' in sys.argv: print(json.dumps(report))
+        else:
+            verb='Would free' if report['dry_run'] else 'Freed'
+            for d in report['reclaimed']: print(verb+' '+d['host']+' ('+d['path']+')')
+            for t in report['templates']: print(verb+' template '+t['name'])
+            print(f"{verb} {report['bytes']/2**30:.1f} GiB; {len(report['waiting'])} more after their {RETENTION_DAYS}-day grace")
     elif action=='setup-logs':
         _,_,key=context()
         os.execvp('python3',['python3',str(BASE/'color-logs.py'),'tail','-n','100','-F',str(BASE/(key+'-setup.log'))])
     elif action=='status':
         for p in sorted(ROUTES.glob('*.json')):
             r=json.loads(p.read_text());print(('active' if r['active'] else 'archived')+' http://'+r['host']+' '+r['path'])
-    else: raise RuntimeError('Usage: cal-worktree setup|archive|status|logs|setup-logs')
+    else: raise RuntimeError('Usage: cal-worktree setup|archive|reclaim|status|logs|setup-logs')
 except Exception as e:
     print('Cal worktree: '+str(e),file=sys.stderr);sys.exit(1)

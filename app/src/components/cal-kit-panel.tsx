@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { toastManager } from "@/components/ui/toast";
+import { KitLeftovers } from "@/components/kit-leftovers";
 import { WorktreeTools } from "@/components/worktree-tools";
 import { calport, type KitStatus, type Location } from "@/lib/calport";
 
@@ -111,6 +112,7 @@ export function CalKitPanel({ box, location, kit, hasOrca, onInstalled }: CalKit
         <CheckIcon className="size-3.5 text-success" />
         Cal.com kit: each worktree runs at <code className="font-mono">{kit.pattern}</code>
       </p>
+      <KitLeftovers box={box} />
       <WorktreeTools box={box} location={location.name} />
     </div>
   );

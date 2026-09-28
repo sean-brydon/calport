@@ -2,6 +2,8 @@ package box
 
 import (
 	"context"
+	"github.com/sean-brydon/calport/internal/events"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -196,4 +198,67 @@ func (c *Client) InstallKit(ctx context.Context, req KitRequest) (out KitResult,
 
 func (c *Client) Stats(ctx context.Context) (out Stats, err error) {
 	return out, c.call(ctx, http.MethodGet, "/v1/stats", nil, &out)
+}
+
+// reclaimRemoved frees a Cal.com worktree's database, port and services
+// once calport itself removed its folder; it runs in the background.
+func (b *Box) reclaimRemoved(loc Location, dir string) {
+	if b.Kit == nil || !loc.Cal || !b.Kit.Status().Installed {
+		return
+	}
+	go b.reclaim(context.Background(), kit.ReclaimOptions{Paths: []string{dir}}, "calport")
+}
+
+func (b *Box) reclaim(ctx context.Context, opts kit.ReclaimOptions, from string) (kit.ReclaimReport, error) {
+	report, err := b.Kit.Reclaim(ctx, opts)
+	if err != nil {
+		log.Printf("kit reclaim: %v", err)
+		return report, err
+	}
+	if !opts.DryRun && (len(report.Reclaimed) > 0 || len(report.Templates) > 0) {
+		b.Events.Publish(events.Event{Type: "kit.reclaimed", Box: b.Name, Origin: from, Data: map[string]any{
+			"worktrees": len(report.Reclaimed), "templates": len(report.Templates), "bytes": report.Bytes,
+		}})
+	}
+	return report, nil
+}
+
+// SweepKit reclaims, every interval, what worktrees whose folder has been
+// gone past the kit's grace period still hold.
+func (b *Box) SweepKit(ctx context.Context, interval time.Duration) {
+	if b.Kit == nil {
+		return
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		if b.Kit.Status().Installed {
+			b.reclaim(ctx, kit.ReclaimOptions{}, "calport")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (b *Box) handleReclaim(w http.ResponseWriter, r *http.Request) error {
+	if b.Kit == nil {
+		return httpError{http.StatusNotImplemented, "the Cal.com kit needs a Linux box with systemd"}
+	}
+	var opts kit.ReclaimOptions
+	if err := decode(r, &opts); err != nil {
+		return err
+	}
+	report, err := b.reclaim(r.Context(), opts, origin(r))
+	if err != nil {
+		return badRequest("%v", err)
+	}
+	writeJSON(w, report)
+	return nil
+}
+
+func (c *Client) Reclaim(ctx context.Context, opts kit.ReclaimOptions) (out kit.ReclaimReport, err error) {
+	return out, c.call(ctx, http.MethodPost, "/v1/kit/reclaim", opts, &out)
 }
