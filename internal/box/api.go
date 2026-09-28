@@ -221,6 +221,15 @@ func (b *Box) addWorktree(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	location := r.PathValue("name")
+	from := origin(r)
+	req.Settled = func(path string, err error) {
+		data := map[string]any{"location": location, "name": req.Name, "path": path}
+		if err != nil {
+			b.Events.Publish(events.Event{Type: "worktree.setup.failed", Box: b.Name, Origin: from, Error: err.Error(), Data: data})
+			return
+		}
+		b.Events.Publish(events.Event{Type: "worktree.setup.finished", Box: b.Name, Origin: from, Data: data})
+	}
 	wt, err := b.Locations.Create(r.Context(), location, req)
 	if err != nil {
 		return err
@@ -233,6 +242,9 @@ func (b *Box) addWorktree(w http.ResponseWriter, r *http.Request) error {
 	b.publish(r, "worktree.created", map[string]any{
 		"location": location, "name": wt.Name, "path": wt.Path, "branch": wt.Branch, "provider": provider,
 	})
+	if wt.SettingUp {
+		b.publish(r, "worktree.setup.started", map[string]any{"location": location, "name": wt.Name, "path": wt.Path})
+	}
 	// Orca runs its own setup script for worktrees it creates; calport runs
 	// the location's when Orca has none.
 	if loc, err := b.Locations.Get(r.Context(), location); err == nil && loc.Scripts.Setup != "" && (provider != "orca" || loc.Scripts.From != "orca") {

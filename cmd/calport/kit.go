@@ -15,6 +15,9 @@ import (
 // kitCommand handles `calport kit BOX` and `calport kit install BOX/LOCATION`.
 // Installing also routes the box's worktree URLs to it from this laptop.
 func kitCommand(l laptop, args []string) error {
+	if len(args) > 0 && args[0] == "check" {
+		return kitCheck(l, args[1:])
+	}
 	fs, asJSON, err := flags("kit", args, nil)
 	if err != nil {
 		return err
@@ -62,7 +65,7 @@ func kitCommand(l laptop, args []string) error {
 		printKit(res, name)
 		return nil
 	}
-	return errors.New("usage: calport kit BOX | calport kit install BOX/LOCATION")
+	return errors.New("usage: calport kit BOX | calport kit install BOX/LOCATION | calport kit check BOX/LOCATION")
 }
 
 // ensureKitRoute sends the kit's hostnames to the box's router, unless a

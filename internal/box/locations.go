@@ -43,6 +43,9 @@ type Worktree struct {
 	Head   string `json:"head,omitempty"`
 	// Main marks the repository's own checkout.
 	Main bool `json:"main,omitempty"`
+	// SettingUp is true when the tool that made it is still running its
+	// setup; a worktree.setup event follows.
+	SettingUp bool `json:"setting_up,omitempty"`
 }
 
 var (

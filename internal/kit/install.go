@@ -181,6 +181,11 @@ func (in *Installer) Install(ctx context.Context, root, host string) (Result, er
 
 	res.Notes = notes
 	dir := in.Dir()
+	if backup, err := in.backupForeign(); err != nil {
+		return res, fmt.Errorf("backing up the existing kit: %w", err)
+	} else if backup != "" {
+		res.Notes = append(res.Notes, "Saved the previous kit's scripts, config and services in "+backup+".")
+	}
 	for _, d := range []string{dir, filepath.Join(dir, "routes"), filepath.Join(dir, "bin"), in.bin()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return res, err
@@ -383,6 +388,47 @@ func lasting(path string) bool {
 		}
 	}
 	return !strings.Contains(path, "fnm_multishells")
+}
+
+// backupForeign copies an existing kit that calport did not write (such as
+// one installed by hand or by Tailmux) aside before it is replaced: its
+// scripts, config and service units. Worktree state is left where it is.
+func (in *Installer) backupForeign() (string, error) {
+	dir := in.Dir()
+	current, err := os.ReadFile(filepath.Join(dir, "cal-worktree"))
+	if err != nil {
+		return "", nil
+	}
+	if ours, _ := files.ReadFile("cal/cal-worktree"); string(current) == string(ours) {
+		return "", nil
+	}
+	backup := filepath.Join(dir, "backup-"+time.Now().UTC().Format("20060102-150405"))
+	if err := os.MkdirAll(backup, 0o700); err != nil {
+		return "", err
+	}
+	entries, _ := fs.ReadDir(files, "cal")
+	names := []string{"config.json"}
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	units := filepath.Join(in.Home, ".config", "systemd", "user")
+	sources := map[string]string{}
+	for _, n := range names {
+		sources[n] = filepath.Join(dir, n)
+	}
+	for _, u := range []string{"cal-worktree-proxy.service", "cal-worktree-lifecycle.service"} {
+		sources[u] = filepath.Join(units, u)
+	}
+	for name, src := range sources {
+		b, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(backup, name), b, 0o600); err != nil {
+			return "", err
+		}
+	}
+	return backup, nil
 }
 
 // link points path at target. A file of the same name that is not already

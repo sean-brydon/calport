@@ -52,6 +52,7 @@ Reaching services
   calport unforward <id>                   Stop and forget a forward
   calport discover [--network NET]            Machines on the tailnet that could be boxes
   calport kit install BOX/LOCATION            Set up Cal.com worktrees on a box: own port, database and URL each
+  calport kit check BOX/LOCATION              Make a throwaway worktree, check setup, URL and archive, end to end
   calport route add '*.x.localhost' BOX PORT  Send every matching host to a box port, Host unchanged
   calport routes [--json]                  List routes (calport route rm PATTERN removes one)
 

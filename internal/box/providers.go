@@ -27,6 +27,9 @@ type WorktreeRequest struct {
 	Prompt string `json:"prompt,omitempty"`
 	// HerdrSession selects the Herdr session to open the workspace in.
 	HerdrSession string `json:"herdr_session,omitempty"`
+	// Settled, when set, hears how a create that returned before its tool
+	// finished (Orca running a setup hook it waits for) ended.
+	Settled func(path string, err error) `json:"-"`
 }
 
 // toolPath finds a tool on PATH or in ~/.local/bin, where Orca, Herdr, and
@@ -49,8 +52,12 @@ func runTool(ctx context.Context, env []string, name string, args ...string) ([]
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
+	// A caller with its own deadline (a create that runs setup) keeps it.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
+	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = append(os.Environ(), env...)
 	out, err := cmd.Output()
@@ -79,7 +86,17 @@ func (l *Locations) Create(ctx context.Context, location string, req WorktreeReq
 	case "", "git":
 		return l.CreateWorktree(ctx, location, req.Name, req.Branch, req.Base)
 	case "orca":
-		path, err = orcaCreate(ctx, loc, req)
+		var running bool
+		path, running, err = orcaCreate(ctx, loc, req)
+		if err == nil && running {
+			for _, w := range describe(ctx, savedLocation{Name: loc.Name, Path: loc.Path}).Worktrees {
+				if w.Path == path {
+					w.SettingUp = true
+					return w, nil
+				}
+			}
+			return Worktree{Name: req.Name, Path: path, SettingUp: true}, nil
+		}
 	case "herdr":
 		path, err = herdrCreate(ctx, loc, req)
 	default:
@@ -116,9 +133,13 @@ func orcaKnowsRepo(repoList []byte, path string) bool {
 		bytes.Contains(repoList, append([]byte(`"path": `), quoted...))
 }
 
-func orcaCreate(ctx context.Context, loc Location, req WorktreeRequest) (string, error) {
+// orcaCreate asks Orca for a worktree. Orca may run the repository's setup
+// hook before it answers, which takes minutes when it waits for setup, so
+// this returns as soon as the git worktree exists; running is then true and
+// req.Settled hears the outcome. A caller that goes away does not stop Orca.
+func orcaCreate(ctx context.Context, loc Location, req WorktreeRequest) (path string, running bool, err error) {
 	if err := orcaEnsureRepo(ctx, loc.Path); err != nil {
-		return "", err
+		return "", false, err
 	}
 	args := []string{"worktree", "create", "--repo", "path:" + loc.Path, "--name", req.Name, "--no-parent", "--json"}
 	if req.Base != "" {
@@ -130,12 +151,83 @@ func orcaCreate(ctx context.Context, loc Location, req WorktreeRequest) (string,
 	if req.Prompt != "" {
 		args = append(args, "--prompt", req.Prompt)
 	}
-	out, err := runTool(ctx, nil, "orca", args...)
-	if err != nil {
-		return "", err
+	before := map[string]bool{}
+	saved := savedLocation{Name: loc.Name, Path: loc.Path}
+	for _, w := range describe(ctx, saved).Worktrees {
+		before[w.Path] = true
 	}
-	return parseOrcaCreate(out)
+	type result struct {
+		out []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), orcaCreateTimeout)
+		defer cancel()
+		out, err := runTool(runCtx, nil, "orca", args...)
+		done <- result{out, err}
+	}()
+	settleLater := func(path string) {
+		go func() {
+			r := <-done
+			err := r.err
+			if err == nil {
+				_, err = parseOrcaCreate(r.out)
+			}
+			if req.Settled != nil {
+				req.Settled(path, err)
+			}
+		}()
+	}
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	giveUp := time.After(orcaAppearTimeout)
+	for {
+		select {
+		case <-giveUp:
+			settleLater("")
+			return "", false, fmt.Errorf("Orca is still creating %s after %v; it will appear in the worktree list when done", req.Name, orcaAppearTimeout)
+		case r := <-done:
+			path, err := "", r.err
+			if err == nil {
+				path, err = parseOrcaCreate(r.out)
+			}
+			if err != nil {
+				// Orca's runtime can drop the CLI's connection while its setup
+				// hook runs, after the worktree is made: that is not a failure.
+				if p := newWorktree(ctx, saved, before, req.Name); p != "" {
+					return p, false, nil
+				}
+			}
+			return path, false, err
+		case <-tick.C:
+			if p := newWorktree(ctx, saved, before, req.Name); p != "" {
+				settleLater(p)
+				return p, true, nil
+			}
+		case <-ctx.Done():
+			settleLater("")
+			return "", false, ctx.Err()
+		}
+	}
 }
+
+// newWorktree is the path of a worktree named name that was not in before.
+func newWorktree(ctx context.Context, loc savedLocation, before map[string]bool, name string) string {
+	for _, w := range describe(ctx, loc).Worktrees {
+		if !before[w.Path] && filepath.Base(w.Path) == name {
+			return w.Path
+		}
+	}
+	return ""
+}
+
+// orcaCreateTimeout bounds Orca's create, setup hook included, and
+// orcaAppearTimeout how long a caller waits for the worktree to exist.
+const (
+	orcaCreateTimeout = 45 * time.Minute
+	orcaAppearTimeout = 150 * time.Second
+)
 
 func parseOrcaCreate(out []byte) (string, error) {
 	var resp struct {

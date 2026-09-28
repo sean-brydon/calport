@@ -139,11 +139,13 @@ func (c *Client) newTransport() *http.Transport {
 	protocols := new(http.Protocols)
 	protocols.SetHTTP2(true)
 	return &http.Transport{
-		TLSClientConfig:       clientConfig(c.id, c.box.Fingerprint),
-		Protocols:             protocols,
-		DialContext:           defaultDial(c.dial),
-		TLSHandshakeTimeout:   dialTimeout,
-		ResponseHeaderTimeout: 30 * time.Second,
+		TLSClientConfig:     clientConfig(c.id, c.box.Fingerprint),
+		Protocols:           protocols,
+		DialContext:         defaultDial(c.dial),
+		TLSHandshakeTimeout: dialTimeout,
+		// Some calls wait on slow tools (Orca fetches before it creates a
+		// worktree); the pings below are what detect a dead connection.
+		ResponseHeaderTimeout: 3 * time.Minute,
 		IdleConnTimeout:       5 * time.Minute,
 		HTTP2:                 &http.HTTP2Config{SendPingTimeout: 15 * time.Second, PingTimeout: 10 * time.Second},
 	}

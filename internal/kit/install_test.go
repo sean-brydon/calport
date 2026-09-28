@@ -121,6 +121,20 @@ func TestReinstallKeepsTheURLLabelAndBacksUpForeignScripts(t *testing.T) {
 	if !strings.Contains(strings.Join(res.Notes, "\n"), "cal-archive.calport-backup") {
 		t.Fatalf("notes do not mention the backup: %q", res.Notes)
 	}
+	saved, _ := filepath.Glob(filepath.Join(in.Dir(), "backup-*", "cal-worktree"))
+	if len(saved) != 1 {
+		t.Fatalf("the previous kit's scripts were not saved: %v", saved)
+	}
+	if b, _ := os.ReadFile(saved[0]); string(b) != "old" {
+		t.Fatalf("saved cal-worktree = %q, want the previous one", b)
+	}
+	// Reinstalling calport's own kit makes no further backups.
+	if _, err := in.Install(context.Background(), root, "devl"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := filepath.Glob(filepath.Join(in.Dir(), "backup-*")); len(again) != 1 {
+		t.Fatalf("a reinstall of calport's kit backed up again: %v", again)
+	}
 }
 
 func TestInstallRefusesWhatItCannotServe(t *testing.T) {
