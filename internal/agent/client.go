@@ -69,6 +69,11 @@ func (c *Client) RemoveForward(ctx context.Context, id string) (Forward, error) 
 	return f, c.call(ctx, http.MethodDelete, "/v1/forwards/"+id, nil, &f)
 }
 
+func (c *Client) Forwards(ctx context.Context) ([]ForwardStatus, error) {
+	s, err := c.Status(ctx)
+	return s.Forwards, err
+}
+
 func (c *Client) Stop(ctx context.Context) error {
 	return c.call(ctx, http.MethodPost, "/v1/stop", nil, nil)
 }
