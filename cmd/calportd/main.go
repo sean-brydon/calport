@@ -237,6 +237,7 @@ func serve(b boxHome, args []string) error {
 		DaemonChecks: func() []doctor.Check { return daemonChecks(b, ln.Addr().String(), *listen) },
 		LogDir:       filepath.Join(b.dir, "logs"),
 		Kit:          kitInstall,
+		Units:        &box.Units{Dir: filepath.Join(b.dir, "units")},
 		AgentStates:  agentStates,
 		Update: &box.SelfUpdate{
 			Executable:    exe,
