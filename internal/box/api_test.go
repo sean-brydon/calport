@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -207,16 +208,23 @@ func TestUnitLogRoundTripsArbitraryBytes(t *testing.T) {
 	wc, _ := servedBox(t)
 	c := NewClient(wc)
 	ctx := context.Background()
-	if _, err := c.AddUnit(ctx, UnitRequest{Name: "calport-probe", Program: "/bin/sh", Args: []string{"-c", "true"}}); err != nil {
+	unit, err := c.AddUnit(ctx, UnitRequest{Name: "calport-probe", Program: "/bin/sh", Args: []string{"-c", "true"}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	// The log is read as bytes, not text: a runtime can write anything.
+	// Invalid UTF-8, an embedded NUL, and a newline: a string would mangle
+	// the first, truncate at the second, and a naive line reader would split
+	// on the third.
+	want := []byte("before\xff\xfe\x00after\ncredential=s3cr3t")
+	if err := os.WriteFile(unit.LogPath, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	got, err := c.UnitLog(ctx, "calport-probe", 1<<20)
 	if err != nil {
 		t.Fatalf("UnitLog() = %v", err)
 	}
-	if got == nil {
-		t.Fatal("UnitLog() returned nil; want the log's bytes, even if empty")
+	if !bytes.Equal(got, want) {
+		t.Fatalf("UnitLog() = %q, want %q", got, want)
 	}
 }
 
