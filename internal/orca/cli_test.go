@@ -95,3 +95,39 @@ exit 1
 		t.Fatalf("error leaks the pairing credential: %v", err)
 	}
 }
+
+// TestFilteredEnvStripsPairingVarsFromRunAndExec is a permanent regression
+// guard: filteredEnv strips ORCA_ENVIRONMENT and ORCA_PAIRING_CODE from the
+// child's environment, but the wiring in run and Exec is what actually
+// assigns cmd.Env — drop that one assignment and the filter silently does
+// nothing. Cover both call sites so they cannot drift apart again.
+func TestFilteredEnvStripsPairingVarsFromRunAndExec(t *testing.T) {
+	t.Setenv("ORCA_ENVIRONMENT", "leaked-env")
+	t.Setenv("ORCA_PAIRING_CODE", "leaked-code")
+
+	cli, _ := fakeOrca(t, `
+env > "$0.env"
+echo '{"ok":true,"result":{"environments":[]}}'
+`)
+
+	assertNoPairingEnvLeaked := func(t *testing.T) {
+		t.Helper()
+		b, err := os.ReadFile(cli.Exe + ".env")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), "ORCA_ENVIRONMENT=") || strings.Contains(string(b), "ORCA_PAIRING_CODE=") {
+			t.Fatalf("child process env carries a pairing var:\n%s", b)
+		}
+	}
+
+	if _, err := cli.Environments(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	assertNoPairingEnvLeaked(t)
+
+	if _, err := cli.Exec(context.Background(), "env-1", []string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	assertNoPairingEnvLeaked(t)
+}

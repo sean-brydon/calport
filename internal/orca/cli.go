@@ -60,6 +60,22 @@ type environment struct {
 	} `json:"endpoints"`
 }
 
+// filteredEnv returns cmd's environment with ORCA_ENVIRONMENT and
+// ORCA_PAIRING_CODE stripped, so a value inherited from the parent process can
+// never route a request to an unrelated paired runtime. Every place that
+// shells out to the Orca CLI must use this, not its own copy of the loop, so
+// the call sites cannot drift apart.
+func filteredEnv(cmd *exec.Cmd) []string {
+	src := cmd.Environ()
+	env := make([]string, 0, len(src))
+	for _, e := range src {
+		if !strings.HasPrefix(e, "ORCA_ENVIRONMENT=") && !strings.HasPrefix(e, "ORCA_PAIRING_CODE=") {
+			env = append(env, e)
+		}
+	}
+	return env
+}
+
 // run calls the CLI and reports only which request failed. A pairing code is
 // passed as an argument, so neither argv nor raw output may appear in an
 // error.
@@ -71,14 +87,7 @@ func (c CLI) run(ctx context.Context, args ...string) (reply, error) {
 	ctx, cancel := context.WithTimeout(ctx, cliTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, append(args, "--json")...)
-	// Never inherit routing to an unrelated paired runtime.
-	env := make([]string, 0, len(cmd.Environ()))
-	for _, e := range cmd.Environ() {
-		if !strings.HasPrefix(e, "ORCA_ENVIRONMENT=") && !strings.HasPrefix(e, "ORCA_PAIRING_CODE=") {
-			env = append(env, e)
-		}
-	}
-	cmd.Env = env
+	cmd.Env = filteredEnv(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return reply{}, fmt.Errorf("the Orca request %q failed; check the runtime and the installed CLI", args[0])
@@ -149,9 +158,11 @@ func (c CLI) Exec(ctx context.Context, environment string, args []string) ([]byt
 	ctx, cancel := context.WithTimeout(ctx, cliTimeout)
 	defer cancel()
 	full := append([]string{"--environment", environment}, args...)
-	out, err := exec.CommandContext(ctx, exe, full...).Output()
+	cmd := exec.CommandContext(ctx, exe, full...)
+	cmd.Env = filteredEnv(cmd)
+	out, err := cmd.Output()
 	if err != nil {
-		return out, fmt.Errorf("the Orca command failed on this runtime")
+		return nil, fmt.Errorf("the Orca command failed on this runtime")
 	}
 	return out, nil
 }
