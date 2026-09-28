@@ -30,6 +30,38 @@ function kitFixture() {
   };
 }
 
+// Worktree tools the preview has "set up", so Set up changes what it shows.
+const setUpTools = new Set<string>();
+
+const previewTools = [
+  { tool: "orca", name: "Orca", file: "orca.yaml", installed: true, detail: "Orca asks you to trust the scripts once." },
+  { tool: "cursor", name: "Cursor", file: ".cursor/worktrees.json", installed: true, detail: "Cursor has no teardown hook; archive its worktrees with cal-archive." },
+  { tool: "codex", name: "Codex", file: ".codex/environments/environment.toml", installed: true, detail: 'Select the "Cal.com worktree kit" environment once in the Codex app. Codex does not run setup over Remote SSH yet (openai/codex#23648).' },
+  { tool: "superset", name: "Superset", file: ".superset/config.json", installed: false },
+  { tool: "herdr", name: "Herdr", file: "/home/alex/.local/share/cal-worktrees/herdr-plugin", installed: true, opt_in: true, detail: "Opt-in: installs a Herdr plugin for your user on this box, which runs the hooks for Herdr worktrees of this checkout." },
+];
+
+function kitToolsFixture(written: string[] = []) {
+  const tools = previewTools.map((t) => ({ ...t, state: setUpTools.has(t.tool) ? "configured" : "missing" }));
+  return {
+    root: "/home/alex/work/cal",
+    written,
+    tools: [
+      ...tools,
+      { tool: "conductor", name: "Conductor", state: "skipped", installed: false, detail: "Conductor makes worktrees on your Mac only, never on a box." },
+      { tool: "claude", name: "Claude Code", state: "skipped", installed: false, detail: "Claude Code's WorktreeCreate hook replaces how it makes worktrees; run cal-setup in one instead." },
+    ],
+  };
+}
+
+function setUpKitToolsFixture(args: string[]) {
+  const i = args.indexOf("--tool");
+  const named = i >= 0 ? args[i + 1].split(",") : ["orca", "cursor", "codex", "superset"];
+  const written = previewTools.filter((t) => named.includes(t.tool) && !setUpTools.has(t.tool)).map((t) => t.file);
+  for (const t of named) setUpTools.add(t);
+  return kitToolsFixture(written);
+}
+
 const fixtures: Record<string, unknown> = {
   status,
   networks: firstRun ? [] : [{ name: "personal", state: "Running", tailnet: "example.com", ips: ["100.64.0.10"] }],
@@ -122,6 +154,7 @@ export async function previewRun(args: string[]): Promise<string> {
   await delay(120);
   if (args[0] === "url") return `http://${args[2]}.${args[1]}.localhost:1355/\n`;
   if (args[0] === "share") return JSON.stringify({ id: "b71c02aa", port: Number(args[2]), url: "https://quiet-river-demo.trycloudflare.com", started: new Date().toISOString(), state: "live" });
+  if (args[0] === "kit" && args[1] === "tools") return JSON.stringify(args.includes("--setup") ? setUpKitToolsFixture(args) : kitToolsFixture());
   if (args[0] === "kit" && args[1] === "install") return JSON.stringify({ kit: { ...kitFixture(), installed: true, pattern: "*.devl.cal.localhost", notes: [] }, routed: true });
   const k = key(args);
   if (k in fixtures) return JSON.stringify(fixtures[k]);

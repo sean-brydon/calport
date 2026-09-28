@@ -89,17 +89,28 @@ What it installs, as your user, with nothing needing root:
   archives and sets up ones it restores;
 - on the laptop, a route for the kit's hostnames to that router.
 
-Worktrees calport creates run the hooks itself. For ones made in Orca's app,
-set the repository's **Worktree Hooks** in Orca's settings:
+Worktrees calport creates run the hooks itself. So worktrees other tools make
+run them too, `calport kit tools BOX/LOCATION --setup` (or **Set up all** under
+**Worktree tools** in the app) writes each tool's per-repository config into
+the checkout and lists it in that clone's `.git/info/exclude`, so it is never
+committed and never shows up in a PR:
 
-```sh
-"$HOME/.local/bin/cal-worktree" setup      # Setup
-"$HOME/.local/bin/cal-archive"             # Archive
-```
+| Tool | What calport does |
+| --- | --- |
+| Orca | `orca.yaml` with `scripts.setup`, `scripts.archive` and `setupAgentStartupPolicy: wait-for-setup`; Orca asks you to trust the scripts once. Hooks set in Orca's own settings take precedence, so when it has some calport writes nothing. |
+| Cursor | `.cursor/worktrees.json` (`setup-worktree`). Cursor has no teardown hook. |
+| Codex app | `.codex/environments/environment.toml` with setup and cleanup. Select the "Cal.com worktree kit" environment once in the app; Codex does not run setup over Remote SSH yet ([openai/codex#23648](https://github.com/openai/codex/issues/23648)). |
+| Superset | `.superset/config.json` with setup and teardown. |
+| Herdr | Opt-in (`--tool herdr`): Herdr has no repository file, so calport installs a plugin for your user in `~/.local/share/cal-worktrees/herdr-plugin` and links it with `herdr plugin link`. Its `worktree.created` and `worktree.removed` hooks run the kit's hooks for worktrees of the kit's checkout. |
+| Conductor | Skipped: it makes worktrees on your Mac only. |
+| Claude Code | Skipped: its `WorktreeCreate` hook replaces how it makes worktrees. Run `cal-setup` in one instead. |
 
-with **Run by default** and **Wait for setup to complete before starting
-agent**. `calport doctor BOX` says when they are missing. Reinstalling keeps a
-box's URL label, so URLs in use keep working.
+A file the repository commits, or one you wrote that runs other scripts, is
+left alone. The hooks read the main checkout and worktree from whichever tool
+runs them (`ORCA_*`, `CONDUCTOR_*`, `SUPERSET_*`, `CODEX_*`, Cursor's
+`ROOT_WORKTREE_PATH`), falling back to the current directory. `calport doctor
+BOX` says when a tool on the box is not set up. Reinstalling keeps a box's URL
+label, so URLs in use keep working.
 
 ### Hooks
 

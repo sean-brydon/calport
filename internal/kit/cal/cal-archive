@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Orca archive hook: stop the worktree's app, then cap build caches that
-# otherwise grow without bound on the box's disk.
+# Archive hook for Orca, Superset, Codex, Herdr or calport: stop the
+# worktree's app, then cap build caches that otherwise grow without bound on
+# the box's disk.
 set -uo pipefail
 start=$(date +%s)
 kit="$HOME/.local/share/cal-worktrees"
@@ -10,7 +11,7 @@ root=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root"])'
 
 # Orca normally deletes the folder after archiving; clear the build output in
 # case it survives, so a kept folder doesn't hold gigabytes of .next.
-work=${ORCA_WORKTREE_PATH:-}
+work=${ORCA_WORKTREE_PATH:-${CONDUCTOR_WORKSPACE_PATH:-${SUPERSET_WORKSPACE_PATH:-${CODEX_WORKTREE_PATH:-}}}}
 if [ -n "$work" ] && [ "$work" != "$root" ] && [ -d "$work/apps/web/.next" ]; then
   rm -rf "$work/apps/web/.next"
   echo "Pruned $(basename "$work")/apps/web/.next"

@@ -85,6 +85,8 @@ func (b *Box) Mount(s *wire.Server) {
 	route("GET /v1/stats", b.handleStats)
 	route("GET /v1/kit", b.kitStatus)
 	route("POST /v1/kit", b.installKit)
+	route("GET /v1/kit/tools", b.kitTools)
+	route("POST /v1/kit/tools", b.setUpKitTools)
 	route("GET /v1/info", b.handleInfo)
 	route("GET /v1/doctor", b.handleDoctor)
 	route("POST /v1/upgrade", b.handleUpgrade)
@@ -245,9 +247,9 @@ func (b *Box) addWorktree(w http.ResponseWriter, r *http.Request) error {
 	if wt.SettingUp {
 		b.publish(r, "worktree.setup.started", map[string]any{"location": location, "name": wt.Name, "path": wt.Path})
 	}
-	// Orca runs its own setup script for worktrees it creates; calport runs
-	// the location's when Orca has none.
-	if loc, err := b.Locations.Get(r.Context(), location); err == nil && loc.Scripts.Setup != "" && (provider != "orca" || loc.Scripts.From != "orca") {
+	// Orca and Herdr run the kit's setup themselves for worktrees they make
+	// once configured to; otherwise calport runs the location's.
+	if loc, err := b.Locations.Get(r.Context(), location); err == nil && loc.Scripts.Setup != "" && !b.toolRunsKitHooks(r.Context(), provider, loc) {
 		go b.lifecycle(origin(r), "setup", loc, wt.Path, wt.Name, loc.Scripts.Setup, nil)
 	}
 	writeJSON(w, wt)
@@ -286,7 +288,7 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 	}
 	// A worktree with an archive script is torn down in the background: the
 	// script may take minutes, and removal only follows if it succeeds.
-	if (!OrcaManaged(dir) || loc.Scripts.From != "orca") && loc.Scripts.Archive != "" {
+	if (!OrcaManaged(dir) || !b.toolRunsKitHooks(r.Context(), "orca", loc)) && loc.Scripts.Archive != "" {
 		from := origin(r)
 		go b.lifecycle(from, "archive", loc, dir, name, loc.Scripts.Archive, func() error {
 			if err := b.Locations.RemoveWorktree(context.Background(), location, name, force); err != nil {

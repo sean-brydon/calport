@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Herdr event hook: runs the Cal.com kit's setup or archive hook for a Herdr
+worktree of the kit's checkout, with the Orca variables the kit reads.
+
+Installed by calportd as a Herdr plugin; `hook setup` or `hook archive`.
+"""
+import json, os, pathlib, subprocess, sys
+
+def worktree_path(payload):
+    """The path of the shallowest `worktree` object, so an envelope around the
+    event and a workspace's own worktree provenance both read right."""
+    level = [payload]
+    while level:
+        for value in level:
+            if isinstance(value, dict) and isinstance(value.get('worktree'), dict) and value['worktree'].get('path'):
+                return value['worktree']['path'], value['worktree'].get('label') or value['worktree'].get('branch') or ''
+        level = [v for value in level for v in (value.values() if isinstance(value, dict) else value if isinstance(value, list) else [])]
+    return None, ''
+
+def common_dir(path):
+    out = subprocess.run(['git', '-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'], capture_output=True, text=True)
+    return pathlib.Path(out.stdout.strip()).resolve() if out.returncode == 0 else None
+
+def main():
+    action = sys.argv[1] if len(sys.argv) > 1 else ''
+    home = pathlib.Path.home()
+    root = json.loads((home/'.local/share/cal-worktrees/config.json').read_text())['root']
+    path, name = worktree_path(json.loads(os.environ.get('HERDR_PLUGIN_EVENT_JSON') or '{}'))
+    if not path or pathlib.Path(path).resolve() == pathlib.Path(root).resolve():
+        return 0
+    # Herdr runs this for every repository; only the kit's checkout is ours.
+    if pathlib.Path(path).exists() and common_dir(path) != common_dir(root):
+        return 0
+    env = dict(os.environ, ORCA_ROOT_PATH=root, ORCA_WORKTREE_PATH=path, ORCA_WORKSPACE_NAME=name)
+    if action == 'setup':
+        return subprocess.run([str(home/'.local/bin/cal-worktree'), 'setup'], cwd=path, env=env).returncode
+    if action == 'archive':
+        return subprocess.run([str(home/'.local/bin/cal-archive')], cwd=str(home), env=env).returncode
+    print('usage: hook setup|archive', file=sys.stderr)
+    return 2
+
+if __name__ == '__main__':
+    sys.exit(main())

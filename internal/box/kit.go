@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/sean-brydon/calport/internal/doctor"
@@ -64,6 +65,76 @@ func (b *Box) installKit(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// KitToolsRequest sets up worktree tools for the kit's location: the named
+// ones, or every missing one that is not opt-in.
+type KitToolsRequest struct {
+	Location string   `json:"location"`
+	Tools    []string `json:"tools,omitempty"`
+}
+
+// KitTools is each worktree tool's state for the kit's checkout, and the
+// files a setup wrote.
+type KitTools struct {
+	Root    string           `json:"root"`
+	Tools   []kit.ToolStatus `json:"tools"`
+	Written []string         `json:"written,omitempty"`
+}
+
+// kitLocation is the location the installed kit serves, as named.
+func (b *Box) kitLocation(ctx context.Context, name string) (Location, error) {
+	if b.Kit == nil {
+		return Location{}, httpError{http.StatusNotImplemented, "the Cal.com kit needs a Linux box with systemd"}
+	}
+	loc, err := b.Locations.Get(ctx, name)
+	if err != nil {
+		return loc, err
+	}
+	if s := b.Kit.Status(); !s.Installed || s.Config.Root != loc.Path {
+		return loc, badRequest("the Cal.com kit is not installed for %s; run: calport kit install BOX/%s", name, name)
+	}
+	return loc, nil
+}
+
+func orcaHooks(root string) kit.OrcaHooks {
+	s, _ := OrcaScripts(root)
+	return kit.OrcaHooks{Setup: s.Setup, Archive: s.Archive}
+}
+
+func (b *Box) kitTools(w http.ResponseWriter, r *http.Request) error {
+	loc, err := b.kitLocation(r.Context(), r.URL.Query().Get("location"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, KitTools{Root: loc.Path, Tools: b.Kit.Tools(r.Context(), loc.Path, orcaHooks(loc.Path))})
+	return nil
+}
+
+func (b *Box) setUpKitTools(w http.ResponseWriter, r *http.Request) error {
+	var req KitToolsRequest
+	if err := decode(r, &req); err != nil {
+		return err
+	}
+	loc, err := b.kitLocation(r.Context(), req.Location)
+	if err != nil {
+		return err
+	}
+	written, err := b.Kit.SetUpTools(r.Context(), loc.Path, req.Tools, orcaHooks(loc.Path))
+	if err != nil {
+		return badRequest("%v", err)
+	}
+	writeJSON(w, KitTools{Root: loc.Path, Tools: b.Kit.Tools(r.Context(), loc.Path, orcaHooks(loc.Path)), Written: written})
+	return nil
+}
+
+// toolRunsKitHooks reports whether the tool making or removing a worktree at
+// loc runs the location's hooks itself, so calport must not run them too.
+func (b *Box) toolRunsKitHooks(ctx context.Context, tool string, loc Location) bool {
+	if tool == "orca" && loc.Scripts.From == "orca" {
+		return true
+	}
+	return loc.Scripts.Setup == kit.SetupHook && b.Kit != nil && b.Kit.RunsHooks(ctx, tool, loc.Path)
+}
+
 // kitChecks reports on the kit for each Cal.com location.
 func (b *Box) kitChecks(ctx context.Context, locs []Location) []doctor.Check {
 	const area = "Cal.com worktrees"
@@ -88,12 +159,31 @@ func (b *Box) kitChecks(ctx context.Context, locs []Location) []doctor.Check {
 			c.Close()
 			checks = append(checks, doctor.Check{Area: area, Name: "router", Status: doctor.OK, Detail: kit.RouterAddr})
 		}
-		if status.Config.Orca != "" && l.Scripts.From != "orca" {
-			checks = append(checks, doctor.Check{Area: area, Name: "Orca hooks for " + l.Name, Status: doctor.Warn,
-				Detail: "worktrees made in Orca's app skip setup", Fix: "In Orca, open the repository's Worktree Hooks settings and set Setup to " + kit.SetupHook + " and Archive to " + kit.ArchiveHook})
+		if status.Config.Root != l.Path {
+			continue
+		}
+		for _, t := range b.Kit.Tools(ctx, l.Path, orcaHooks(l.Path)) {
+			fix := "calport kit tools BOX/" + l.Name + " --setup --tool " + t.Tool
+			switch {
+			case t.Tool == "orca" && status.Config.Orca != "" && t.State == kit.ToolMissing:
+				checks = append(checks, doctor.Check{Area: area, Name: "Orca hooks for " + l.Name, Status: doctor.Warn,
+					Detail: "worktrees made in Orca's app skip setup",
+					Fix:    fix + "  (or set Worktree Hooks in Orca's settings to " + kit.SetupHook + " and " + kit.ArchiveHook + ")"})
+			case t.Tool != "orca" && t.Installed && t.State == kit.ToolMissing:
+				checks = append(checks, doctor.Check{Area: area, Name: t.Name + " hooks for " + l.Name, Status: doctor.Info,
+					Detail: t.Name + " is on this box, but worktrees it makes skip setup", Fix: fix})
+			}
 		}
 	}
 	return checks
+}
+
+func (c *Client) KitTools(ctx context.Context, location string) (out KitTools, err error) {
+	return out, c.call(ctx, http.MethodGet, "/v1/kit/tools?location="+url.QueryEscape(location), nil, &out)
+}
+
+func (c *Client) SetUpKitTools(ctx context.Context, req KitToolsRequest) (out KitTools, err error) {
+	return out, c.call(ctx, http.MethodPost, "/v1/kit/tools", req, &out)
 }
 
 func (c *Client) Kit(ctx context.Context) (out kit.Status, err error) {

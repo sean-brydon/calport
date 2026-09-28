@@ -18,6 +18,9 @@ func kitCommand(l laptop, args []string) error {
 	if len(args) > 0 && args[0] == "check" {
 		return kitCheck(l, args[1:])
 	}
+	if len(args) > 0 && args[0] == "tools" {
+		return kitTools(l, args[1:])
+	}
 	fs, asJSON, err := flags("kit", args, nil)
 	if err != nil {
 		return err
@@ -62,10 +65,10 @@ func kitCommand(l laptop, args []string) error {
 		if asJSON {
 			return printJSON(map[string]any{"kit": res, "routed": routed})
 		}
-		printKit(res, name)
+		printKit(res, name, pos[1])
 		return nil
 	}
-	return errors.New("usage: calport kit BOX | calport kit install BOX/LOCATION | calport kit check BOX/LOCATION")
+	return errors.New("usage: calport kit BOX | calport kit install BOX/LOCATION | calport kit tools BOX/LOCATION | calport kit check BOX/LOCATION")
 }
 
 // ensureKitRoute sends the kit's hostnames to the box's router, unless a
@@ -90,17 +93,11 @@ func ensureKitRoute(l laptop, boxName, pattern string) (bool, error) {
 	return true, c.Call(context.Background(), "POST", "/v1/routes", r, nil)
 }
 
-func printKit(res box.KitResult, boxName string) {
+func printKit(res box.KitResult, boxName, target string) {
 	fmt.Printf("Installed the Cal.com kit on %s for %s.\n", boxName, res.Config.Root)
 	fmt.Printf("Worktree URLs look like http://NAME-abc123.%s.cal.localhost\n", res.Config.Host)
 	for _, n := range res.Notes {
 		fmt.Println("Note: " + n)
 	}
-	if res.Config.Orca != "" && res.HooksFrom != "orca" {
-		fmt.Println("\nSo worktrees made in Orca's app are set up too, open the repository in Orca's")
-		fmt.Println("settings, under Worktree Hooks, and set:")
-		fmt.Println("  Setup    " + kit.SetupHook)
-		fmt.Println("  Archive  " + kit.ArchiveHook)
-		fmt.Println("with Run by default, and Wait for setup to complete before starting agent.")
-	}
+	fmt.Printf("\nSo worktrees made in Orca, Cursor, Codex or Superset are set up too, run:\n  calport kit tools %s --setup\n", target)
 }

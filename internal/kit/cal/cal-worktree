@@ -36,11 +36,25 @@ def save(p, value):
 def read_env(root):
     return json.loads(subprocess.check_output([NODE,str(BASE/'database.cjs'),'env',str(root)],env=ENV))
 def unit(key): return 'cal-worktree-'+key+'.service'
-def context():
-    root=pathlib.Path(os.environ.get('ORCA_ROOT_PATH',CONFIG['root'])).resolve()
-    work=pathlib.Path(os.environ.get('ORCA_WORKTREE_PATH',os.getcwd())).resolve()
-    if root!=pathlib.Path(CONFIG['root']).resolve(): raise RuntimeError('Unexpected Orca repository root')
+def locate(env, args, cwd):
+    """(root, worktree, name) from whichever tool runs the hook; root is None when it doesn't say."""
+    for root, work, name in [('ORCA_ROOT_PATH','ORCA_WORKTREE_PATH','ORCA_WORKSPACE_NAME'),
+                             ('CONDUCTOR_ROOT_PATH','CONDUCTOR_WORKSPACE_PATH','CONDUCTOR_WORKSPACE_NAME'),
+                             ('SUPERSET_ROOT_PATH','SUPERSET_WORKSPACE_PATH','SUPERSET_WORKSPACE_NAME'),
+                             ('CODEX_SOURCE_TREE_PATH','CODEX_WORKTREE_PATH','')]:
+        if env.get(root) or env.get(work): return env.get(root) or None, env.get(work) or cwd, env.get(name) or None
+    if env.get('ROOT_WORKTREE_PATH'): return env['ROOT_WORKTREE_PATH'], (args[0] if args else cwd), None
+    return None, cwd, None
+def where():
+    return locate(os.environ,[a for a in sys.argv[2:] if not a.startswith('-')],os.getcwd())
+def context(gone_ok=False):
+    given_root,given_work,_=where()
+    root=pathlib.Path(given_root or CONFIG['root']).resolve()
+    work=pathlib.Path(given_work).resolve()
+    if root!=pathlib.Path(CONFIG['root']).resolve(): raise RuntimeError('Unexpected repository root '+str(root))
     if work==root: raise RuntimeError('Use this hook on a worktree, not the main checkout')
+    # Herdr removes the folder before its hook runs, leaving nothing to ask git.
+    if gone_ok and not work.exists(): return root,work,hashlib.sha256(str(work).encode()).hexdigest()[:12]
     common=subprocess.check_output(['git','-C',str(work),'rev-parse','--path-format=absolute','--git-common-dir'],text=True).strip()
     expected=subprocess.check_output(['git','-C',str(root),'rev-parse','--path-format=absolute','--git-common-dir'],text=True).strip()
     if pathlib.Path(common).resolve()!=pathlib.Path(expected).resolve(): raise RuntimeError('Worktree belongs to another repository')
@@ -104,7 +118,7 @@ def setup():
             file=ROUTES/(key+'.json')
             if file.exists(): record=load(key)
             else:
-                name=os.environ.get('ORCA_WORKSPACE_NAME') or subprocess.check_output(['git','-C',str(work),'branch','--show-current'],text=True).strip() or work.name
+                name=where()[2] or subprocess.check_output(['git','-C',str(work),'branch','--show-current'],text=True).strip() or work.name
                 slug=re.sub('[^a-z0-9]+','-',name.lower()).strip('-')[:42].rstrip('-') or 'branch'
                 host=f'{slug}-{key[:6]}.{CONFIG["host"]}.cal.localhost'
                 taken={json.loads(p.read_text())['port'] for p in ROUTES.glob('*.json')}
@@ -215,7 +229,7 @@ def setup():
         raise RuntimeError('Server did not become ready; inspect journalctl --user -u '+unit(key))
 
 def archive(key=None):
-    if key is None: _,_,key=context()
+    if key is None: _,_,key=context(gone_ok=True)
     (BASE/(key+'.cancelled')).touch()
     subprocess.run(['systemctl','--user','stop','cal-studio-'+key+'.service'],env=ENV,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     subprocess.run(['systemctl','--user','stop',unit(key)],env=ENV,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

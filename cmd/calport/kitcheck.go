@@ -83,6 +83,12 @@ func kitCheck(l laptop, args []string) error {
 	runs := "calport runs the location's scripts"
 	if *provider == "orca" && loc.Scripts.From == "orca" {
 		runs = "Orca runs its own hooks, as for worktrees made in its app"
+	} else if tools, err := c.KitTools(ctx, location); err == nil {
+		for _, t := range tools.Tools {
+			if t.Tool == *provider && t.State == kit.ToolConfigured {
+				runs = t.Name + " runs the kit's hooks from " + t.File + ", as for worktrees made in it"
+			}
+		}
 	}
 	step("Kit on %s serves %s; %s: setup %s", boxName, st.Pattern, runs, loc.Scripts.Setup)
 
