@@ -88,12 +88,18 @@ func (c *Client) AddWorktree(ctx context.Context, location string, req WorktreeR
 	return out, c.call(ctx, http.MethodPost, "/v1/locations/"+url.PathEscape(location)+"/worktrees", req, &out)
 }
 
-func (c *Client) RemoveWorktree(ctx context.Context, location, name string, force bool) error {
+// RemoveWorktree removes a worktree, or starts archiving it: archive is the
+// script the box runs first, removing the worktree only if it succeeds.
+func (c *Client) RemoveWorktree(ctx context.Context, location, name string, force bool) (archive string, err error) {
 	path := "/v1/locations/" + url.PathEscape(location) + "/worktrees/" + url.PathEscape(name)
 	if force {
 		path += "?force=1"
 	}
-	return c.call(ctx, http.MethodDelete, path, nil, nil)
+	var out struct {
+		Archive string `json:"archive"`
+	}
+	err = c.call(ctx, http.MethodDelete, path, nil, &out)
+	return out.Archive, err
 }
 
 func (c *Client) Sessions(ctx context.Context) (out []Session, err error) {

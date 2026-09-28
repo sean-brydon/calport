@@ -76,6 +76,15 @@ def outputs_present(work):
         'packages/infra/adapters/database/prisma/generated',
     ])
 
+def seed_workspace(work):
+    # Cal.com moved its Prisma package; public checkouts still use @calcom/prisma.
+    for rel in ('packages/infra/adapters/database','packages/prisma'):
+        pkg=work/rel/'package.json'
+        if pkg.exists():
+            data=json.loads(pkg.read_text())
+            if 'seed-basic' in data.get('scripts',{}): return data['name']
+    raise RuntimeError('No workspace with a seed-basic script; seed the database by hand')
+
 def healthy(record):
     req=urllib.request.Request('http://127.0.0.1:'+str(record['port'])+'/auth/login',headers={'Host':record['host']})
     try:
@@ -176,7 +185,7 @@ def setup():
                 timed('Apply migrations',lambda: call(['yarn','prisma','migrate','deploy'],cwd=work,stdout=log,stderr=log))
                 check_cancelled()
                 if not record['seeded']:
-                    timed('Seed development data',lambda: call(['yarn','workspace','@calcom/database','seed-basic'],cwd=work,stdout=log,stderr=log))
+                    timed('Seed development data',lambda: call(['yarn','workspace',seed_workspace(work),'seed-basic'],cwd=work,stdout=log,stderr=log))
                     record['seeded']=True;save(file,record)
             else:
                 print('Checkout unchanged; dependencies and migrations already prepared',flush=True)
@@ -223,7 +232,8 @@ def archive(key=None):
         fcntl.flock(lock,fcntl.LOCK_EX)
         if not (ROUTES/(key+'.json')).exists(): return
         record=set_active(key,False)
-        call(['systemctl','--user','disable','--now',unit(key)],stdout=subprocess.DEVNULL)
+        # A worktree archived while setup still runs has no unit yet.
+        subprocess.run(['systemctl','--user','disable','--now',unit(key)],env=ENV,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         print('Stopped '+record['host']+'; database and URL retained for reopening.')
 
 def studio(key):

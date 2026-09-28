@@ -235,8 +235,13 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		if !ok {
 			return usageErr("worktree rm LOC/NAME [--force]")
 		}
-		if err := c.RemoveWorktree(ctx, loc, name, *force); err != nil {
+		archive, err := c.RemoveWorktree(ctx, loc, name, *force)
+		if err != nil {
 			return err
+		}
+		if archive != "" {
+			fmt.Fprintf(out, "Archiving %s/%s: running %s, then removing it if that succeeds. Watch with the events command.\n", loc, name, archive)
+			return nil
 		}
 		fmt.Fprintf(out, "Removed worktree %s/%s\n", loc, name)
 		return nil

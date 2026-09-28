@@ -7,12 +7,16 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"io"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/sean-brydon/calport/internal/agent"
@@ -94,15 +98,28 @@ func kitCheck(l laptop, args []string) error {
 		return fmt.Errorf("creating %s with %s: %w", name, *provider, err)
 	}
 	step("Created %s/%s with %s at %s", location, name, *provider, wt.Path)
+	var once sync.Once
 	cleanup := func() {
 		if *keep {
 			return
 		}
-		step("Archiving %s…", name)
-		if err := c.RemoveWorktree(ctx, location, name, true); err != nil {
-			step("✗ archiving failed: %v", err)
-		}
+		once.Do(func() {
+			step("Archiving %s…", name)
+			if _, err := c.RemoveWorktree(context.Background(), location, name, true); err != nil {
+				step("✗ archiving failed: %v", err)
+			}
+		})
 	}
+	// An interrupted check must not leave its worktree running on the box.
+	interrupted := make(chan os.Signal, 1)
+	signal.Notify(interrupted, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(interrupted)
+	go func() {
+		if _, ok := <-interrupted; ok {
+			cleanup()
+			os.Exit(130)
+		}
+	}()
 
 	web := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	get := func(host, path string) (int, []byte) {

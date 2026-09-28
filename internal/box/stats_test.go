@@ -84,3 +84,20 @@ func TestWorktreeForPicksTheDeepest(t *testing.T) {
 		t.Fatalf("a sibling directory matched: %s/%s", l, w)
 	}
 }
+
+func TestStatsUseTheContainersLimits(t *testing.T) {
+	proc := fakeProc(t)
+	cg := t.TempDir()
+	os.WriteFile(filepath.Join(cg, "memory.max"), []byte("8589934592\n"), 0o644)
+	os.WriteFile(filepath.Join(cg, "memory.current"), []byte("4294967296\n"), 0o644)
+	os.WriteFile(filepath.Join(cg, "cpu.max"), []byte("100000 100000\n"), 0o644)
+	s := collectStatsIn(proc, cg)
+	if s.Memory.Total != 8<<30 || s.Memory.Used != 4<<30 || s.CPUs != 1 {
+		t.Fatalf("memory %+v, cpus %d; want the cgroup's 8 GiB, 4 GiB used, 1 CPU", s.Memory, s.CPUs)
+	}
+	os.WriteFile(filepath.Join(cg, "memory.max"), []byte("max\n"), 0o644)
+	os.WriteFile(filepath.Join(cg, "cpu.max"), []byte("max 100000\n"), 0o644)
+	if s := collectStatsIn(proc, cg); s.Memory.Total != 16000000*1024 || s.CPUs == 1 {
+		t.Fatalf("an unlimited cgroup changed the totals: %+v, %d CPUs", s.Memory, s.CPUs)
+	}
+}

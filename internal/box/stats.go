@@ -154,6 +154,13 @@ func hooksInstalled(home string) bool {
 }
 
 func collectStats(proc string) Stats {
+	return collectStatsIn(proc, "/sys/fs/cgroup")
+}
+
+// collectStatsIn reads the kernel's view, narrowed to the limits of the
+// cgroup the box runs in: inside a container, the host's totals are not the
+// box's to use.
+func collectStatsIn(proc, cgroup string) Stats {
 	s := Stats{CPUs: runtime.NumCPU()}
 	s.Hostname, _ = os.Hostname()
 	if b, err := os.ReadFile(filepath.Join(proc, "uptime")); err == nil {
@@ -170,6 +177,12 @@ func collectStats(proc string) Stats {
 		}
 	}
 	s.Memory, s.Swap = memInfo(filepath.Join(proc, "meminfo"))
+	if limit, used, ok := cgroupMemory(cgroup); ok && limit < s.Memory.Total {
+		s.Memory = Usage{Total: limit, Used: used}
+	}
+	if cpus := cgroupCPUs(cgroup); cpus > 0 && cpus < s.CPUs {
+		s.CPUs = cpus
+	}
 	s.Disks = disks()
 	s.Agents = agentProcesses(proc)
 	return s
@@ -196,6 +209,43 @@ func memInfo(path string) (mem, swap Usage) {
 	mem = Usage{Total: kb["MemTotal"], Used: kb["MemTotal"] - kb["MemAvailable"]}
 	swap = Usage{Total: kb["SwapTotal"], Used: kb["SwapTotal"] - kb["SwapFree"]}
 	return
+}
+
+// cgroupMemory reads a cgroup v2 memory limit. Only a container's own root
+// has memory.max at the top; a host's root cgroup has none.
+func cgroupMemory(root string) (limit, used uint64, ok bool) {
+	b, err := os.ReadFile(filepath.Join(root, "memory.max"))
+	if err != nil {
+		return 0, 0, false
+	}
+	limit, err = strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
+	if err != nil {
+		return 0, 0, false // "max": no limit
+	}
+	b, err = os.ReadFile(filepath.Join(root, "memory.current"))
+	if err != nil {
+		return 0, 0, false
+	}
+	used, err = strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
+	return limit, used, err == nil
+}
+
+// cgroupCPUs reads a cgroup v2 CPU quota ("600000 100000" is 6 CPUs).
+func cgroupCPUs(root string) int {
+	b, err := os.ReadFile(filepath.Join(root, "cpu.max"))
+	if err != nil {
+		return 0
+	}
+	f := strings.Fields(string(b))
+	if len(f) != 2 || f[0] == "max" {
+		return 0
+	}
+	quota, err1 := strconv.ParseFloat(f[0], 64)
+	period, err2 := strconv.ParseFloat(f[1], 64)
+	if err1 != nil || err2 != nil || period == 0 {
+		return 0
+	}
+	return int(quota/period + 0.5)
 }
 
 // disks reports the root filesystem and, when separate, the home one.

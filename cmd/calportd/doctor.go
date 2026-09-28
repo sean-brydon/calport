@@ -14,7 +14,9 @@ import (
 )
 
 // daemonChecks runs inside calportd serve, where the listen address is known.
-func daemonChecks(b boxHome, listening string) []doctor.Check {
+// daemonChecks describes the running daemon. listening is the bound address;
+// listenFlag is the --listen it was started with, which its unit names.
+func daemonChecks(b boxHome, listening, listenFlag string) []doctor.Check {
 	const area = "calportd"
 	checks := []doctor.Check{}
 	host, _, _ := net.SplitHostPort(listening)
@@ -28,7 +30,7 @@ func daemonChecks(b boxHome, listening string) []doctor.Check {
 	default:
 		checks = append(checks, doctor.Check{Area: area, Name: "listening", Status: doctor.OK, Detail: listening})
 	}
-	if service.Installed(daemonService(b, listening)) || service.Installed(daemonService(b, "")) {
+	if service.Installed(daemonService(b, listenFlag)) {
 		checks = append(checks, doctor.Check{Area: area, Name: "starts at boot", Status: doctor.OK, Detail: "installed as a user service"})
 	} else {
 		checks = append(checks, doctor.Check{Area: area, Name: "starts at boot", Status: doctor.Warn, Detail: "calportd runs, but not as a service", Fix: "calportd install"})

@@ -226,7 +226,7 @@ func serve(b boxHome, args []string) error {
 		Shares:       shares,
 		Events:       bus,
 		Watcher:      watcher,
-		DaemonChecks: func() []doctor.Check { return daemonChecks(b, ln.Addr().String()) },
+		DaemonChecks: func() []doctor.Check { return daemonChecks(b, ln.Addr().String(), *listen) },
 		LogDir:       filepath.Join(b.dir, "logs"),
 		Kit:          kitInstaller(exe),
 		AgentStates:  agentStates,
