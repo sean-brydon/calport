@@ -13,7 +13,7 @@ import (
 const orcaUsage = `Usage:
   calport orca serve BOX          Install and start the runtime unit on the box
   calport orca connect BOX        Serve if needed, then tunnel it and pair this computer
-  calport orca status BOX         Restore the tunnel if it is gone, verify, and report
+  calport orca status BOX         Report whether the paired runtime is reachable
   calport orca exec BOX -- ARGS   Run an orca command against that box's runtime
 
 connect is the whole flow; serve exists for running a runtime without pairing
@@ -52,9 +52,16 @@ func orcaCommand(l laptop, args []string) error {
 		fmt.Printf("Orca on this computer now reaches %s at ws://127.0.0.1:%d.\n", boxName, route.LocalPort)
 		return nil
 	case "status":
-		route, err := conn.Connect(ctx, boxName)
+		routes, err := conn.Store.Read()
 		if err != nil {
 			return err
+		}
+		route, ok := routes[boxName]
+		if !ok || route.Environment == "" {
+			return fmt.Errorf("%s is not paired with this computer's Orca; run: calport orca connect %s", boxName, boxName)
+		}
+		if err := conn.CLI.Verify(ctx, route.Environment, route.Runtime); err != nil {
+			return fmt.Errorf("%s: %w", boxName, err)
 		}
 		fmt.Printf("%s: runtime reachable at ws://127.0.0.1:%d\n", boxName, route.LocalPort)
 		return nil

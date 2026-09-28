@@ -81,9 +81,15 @@ calport orca connect devl
 
 It installs and starts the runtime as a managed unit on the box if it is not
 already running, tunnels it over the same paired connection calport already
-uses to reach that box, and pairs the local Orca app with it. The runtime
-binds to the box's loopback interface and is reached only through calportd's
-tunnel, so nothing needs opening in the box's firewall.
+uses to reach that box, and pairs the local Orca app with it. calport itself
+always reaches the runtime through that existing tunnel over calportd, so
+nothing needs forwarding or opening for calport's own use. But `orca serve`
+has no flag to restrict its bind address, so the runtime listens on every
+interface on the box, not just loopback — anything else on the box's network
+can still reach its port directly. calport does not close that off, and does
+not open it either: restricting the runtime's port, if that matters for a
+given box's network, remains a box-hardening concern that calport neither
+solves nor worsens.
 
 Orca is the one that holds the pairing credential, once it has paired;
 calport itself only ever stores the route (the runtime's identity and the
@@ -94,10 +100,12 @@ Orca.
 
 A box's local port is fixed the first time it pairs, because the pairing
 code the local Orca app stores embeds that port. Reconnecting (`calport orca
-connect BOX` again, or `calport orca status BOX`) restores the tunnel on the
-same port if it was lost; it does not move to a new one. `calport orca exec
-BOX -- ARGS` runs an `orca` command against that box's paired runtime, and
-`calport orca serve BOX` starts the runtime without pairing to it.
+connect BOX` again) restores the tunnel on the same port if it was lost; it
+does not move to a new one. `calport orca status BOX` only reports whether
+the runtime this computer already paired with is reachable — it neither
+installs nor pairs anything. `calport orca exec BOX -- ARGS` runs an `orca`
+command against that box's paired runtime, and `calport orca serve BOX`
+starts the runtime without pairing to it.
 
 ### The Cal.com kit
 
