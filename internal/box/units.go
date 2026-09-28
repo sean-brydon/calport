@@ -103,8 +103,8 @@ func (u *Units) spec(req UnitRequest) (service.Spec, error) {
 
 func (u *Units) logPath(name string) string { return filepath.Join(u.Dir, name+".log") }
 
-// Install writes the unit, starts it, and reports it. Installing a unit that
-// already exists replaces it, so a changed program or argument takes effect.
+// Install writes the unit, starts it, and reports it. Installing a unit whose
+// spec changed replaces it, so a changed program or argument takes effect.
 func (u *Units) Install(ctx context.Context, req UnitRequest) (Unit, error) {
 	spec, err := u.spec(req)
 	if err != nil {
@@ -122,8 +122,17 @@ func (u *Units) Install(ctx context.Context, req UnitRequest) (Unit, error) {
 	}
 	logFile.Close()
 	ops := u.ops()
-	if _, err := ops.install(spec); err != nil {
-		return Unit{}, fmt.Errorf("installing unit %s: %w", req.Name, err)
+	// Writing the unit reloads it, which on both platforms means stopping the
+	// running program and starting it again. When the file on disk is already
+	// byte-for-byte this spec there is nothing to apply, so skip it: callers
+	// install to make sure a unit is running, and a healthy long-lived program
+	// must not be killed just because someone asked for it again. start is
+	// still called - it is a no-op on a running unit and brings back a stopped
+	// one.
+	if !ops.installed(spec) {
+		if _, err := ops.install(spec); err != nil {
+			return Unit{}, fmt.Errorf("installing unit %s: %w", req.Name, err)
+		}
 	}
 	if err := ops.start(spec); err != nil {
 		return Unit{}, fmt.Errorf("starting unit %s: %w", req.Name, err)

@@ -108,6 +108,45 @@ func TestGetAndRemoveFindTheUnitInstallReported(t *testing.T) {
 	}
 }
 
+// Writing the unit file restarts the program it runs. A caller installing the
+// unit it already installed is asking for it to be running, not for it to be
+// killed and started again.
+func TestInstallLeavesAnUnchangedUnitRunning(t *testing.T) {
+	svc, calls := fakeService()
+	u := &Units{Dir: t.TempDir(), svc: svc}
+	req := UnitRequest{Name: "calport-probe", Program: "/bin/sh", Args: []string{"-c", "true"}}
+	if _, err := u.Install(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := u.Install(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"install calport-probe /bin/sh", "start calport-probe", "start calport-probe"}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("service calls = %v; want %v, with no second install", *calls, want)
+	}
+}
+
+func TestInstallReplacesAUnitWhoseSpecChanged(t *testing.T) {
+	svc, calls := fakeService()
+	u := &Units{Dir: t.TempDir(), svc: svc}
+	if _, err := u.Install(context.Background(), UnitRequest{Name: "calport-probe", Program: "/bin/sh", Args: []string{"-c", "true"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := u.Install(context.Background(), UnitRequest{Name: "calport-probe", Program: "/bin/sh", Args: []string{"-c", "false"}}); err != nil {
+		t.Fatal(err)
+	}
+	installs := 0
+	for _, c := range *calls {
+		if strings.HasPrefix(c, "install ") {
+			installs++
+		}
+	}
+	if installs != 2 {
+		t.Fatalf("service calls = %v; want the changed spec reinstalled", *calls)
+	}
+}
+
 func TestUnitNamesMayNotEscapeTheUnitDirectory(t *testing.T) {
 	svc, _ := fakeService()
 	u := &Units{Dir: t.TempDir(), svc: svc}
