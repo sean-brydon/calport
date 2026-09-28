@@ -6,7 +6,8 @@
 #   make publish VERSION=0.3.0 [NOTES="What changed"]
 #
 # The updater key comes from TAURI_SIGNING_PRIVATE_KEY, else from 1Password
-# (CALPORT_SIGNING_KEY_OP=op://Vault/Item/field), else ~/.tauri/calport.key.
+# (CALPORT_SIGNING_KEY_OP=op://Vault/Item/field), else ~/.tauri/calport.key,
+# else the "Calport updater signing key" item in 1Password's Private vault.
 set -euo pipefail
 
 version="${VERSION:?set VERSION, e.g. make publish VERSION=0.3.0}"
@@ -27,6 +28,8 @@ if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
     TAURI_SIGNING_PRIVATE_KEY="$(op read "$CALPORT_SIGNING_KEY_OP")"
   elif [ -f "$HOME/.tauri/calport.key" ]; then
     TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/calport.key")"
+  elif command -v op >/dev/null && TAURI_SIGNING_PRIVATE_KEY="$(op read "op://Private/Calport updater signing key/private key" 2>/dev/null)"; then
+    :
   else
     die "no updater signing key: set TAURI_SIGNING_PRIVATE_KEY or CALPORT_SIGNING_KEY_OP"
   fi
