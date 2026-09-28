@@ -1,10 +1,18 @@
 import type { Machine } from "@/lib/calport";
 
-// sshTarget is what to pass to ssh for a discovered machine. On this
-// computer's own tailnet its MagicDNS name resolves, and matches any ssh
-// config entry for it; through a calport network only the address is dialled.
-export function sshTarget(machine: Machine, user: string, network: string): string {
-  const host = network ? machine.ip : machine.name;
+export interface SSHTarget {
+  // host is what ssh connects to: the machine's name, so an ~/.ssh/config
+  // entry for it (its user, key, or 1Password agent) applies.
+  host: string;
+  // options reach the machine by address through a calport network, whose
+  // tailnet names this computer cannot resolve.
+  options: string[];
+}
+
+export function sshTarget(machine: Machine, user: string, network: string): SSHTarget {
   const login = user.trim();
-  return login ? `${login}@${host}` : host;
+  return {
+    host: login ? `${login}@${machine.name}` : machine.name,
+    options: network ? ["-o", `HostName=${machine.ip}`] : [],
+  };
 }

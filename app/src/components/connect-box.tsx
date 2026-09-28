@@ -154,7 +154,8 @@ function SSHForm({ networks, network, setNetwork, onNetworksChanged, onConnected
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const login = user ?? machines.data?.user ?? "";
-  const target = manual || !picked ? host.trim() : sshTarget(picked, login, network);
+  const resolved = manual || !picked ? { host: host.trim(), options: [] } : sshTarget(picked, login, network);
+  const target = resolved.host;
   const fallbackName = manual ? "" : (picked?.name ?? "");
 
   return (
@@ -177,6 +178,7 @@ function SSHForm({ networks, network, setNetwork, onNetworksChanged, onConnected
             },
             chosenName || undefined,
             network || undefined,
+            resolved.options,
           );
           toastManager.add({ title: `Connected ${paired || target}`, type: "success" });
           onConnected(paired || chosenName || target);

@@ -296,8 +296,11 @@ export const calport = {
   uninstallAgent: () => run(["agent", "uninstall"]),
   installIntegration: (tool: "claude" | "cursor" | "codex") => run(["integrations", "install", tool]),
   networkLogin: (name: string, onLine: (line: string) => void) => stream(["network", "login", name], onLine),
-  addSSHStreaming: (host: string, onLine: (line: string) => void, name?: string, network?: string) =>
-    stream(["add", "ssh", host, ...(name ? ["--name", name] : []), ...(network ? ["--network", network] : [])], onLine),
+  addSSHStreaming: (host: string, onLine: (line: string) => void, name?: string, network?: string, sshOptions: string[] = []) =>
+    stream(
+      ["add", "ssh", host, ...(name ? ["--name", name] : []), ...(network ? ["--network", network] : []), ...(sshOptions.length ? ["--", ...sshOptions] : [])],
+      onLine,
+    ),
 
   status: () => json<Status>(["status"]),
   networks: () => json<Network[]>(["networks"]),

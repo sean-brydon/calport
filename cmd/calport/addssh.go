@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -89,7 +90,17 @@ func addSSH(l laptop, args []string) error {
 	sshArgs = append([]string{"-o", "ControlPath=" + filepath.Join(control, "%C")}, sshArgs...)
 	env := askpassEnv(exe)
 	if err := openMaster(sshArgs, target, env, control); err != nil {
-		return err
+		// Keys kept in 1Password are only offered where ~/.ssh/config names
+		// its agent; for a box with no entry of its own, try that agent too.
+		agent := onePasswordAgent()
+		if agent == "" || !strings.Contains(err.Error(), "refused the login") || slices.ContainsFunc(sshArgs, func(a string) bool { return strings.HasPrefix(a, "IdentityAgent") }) {
+			return err
+		}
+		fmt.Println("Trying the keys in 1Password…")
+		sshArgs = append([]string{"-o", "IdentityAgent=" + agent}, sshArgs...)
+		if err2 := openMaster(sshArgs, target, env, control); err2 != nil {
+			return fmt.Errorf("%w (1Password's SSH agent was tried too)", err)
+		}
 	}
 	defer exec.Command("ssh", append(append([]string{}, sshArgs...), "-O", "exit", target)...).Run()
 	ssh := func(stdin []byte, remote string) ([]byte, error) {
@@ -184,6 +195,19 @@ func addSSH(l laptop, args []string) error {
 	}
 	fmt.Printf("Paired with %s at %s. SSH is no longer needed for this box.\n", peer.Name, peer.Address)
 	return nil
+}
+
+// onePasswordAgent is 1Password's SSH agent socket, when it is running.
+func onePasswordAgent() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	sock := filepath.Join(home, "Library", "Group Containers", "2BUA8C4S2C.com.1password", "t", "agent.sock")
+	if st, err := os.Stat(sock); err == nil && st.Mode()&os.ModeSocket != 0 {
+		return sock
+	}
+	return ""
 }
 
 // checkName refuses a --name that cannot be a hostname before any work is
