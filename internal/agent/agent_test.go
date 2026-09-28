@@ -732,3 +732,34 @@ func TestWorktreeHostnamesReachTheWorktreesDevServer(t *testing.T) {
 		t.Fatalf("a worktree with no server got %d", resp.StatusCode)
 	}
 }
+
+func TestPinnedForwardsRoundTripThroughTheStore(t *testing.T) {
+	dir := t.TempDir()
+	s := forwardStore{path: filepath.Join(dir, "forwards.json")}
+	if _, err := s.add(Forward{Box: "devl", Local: 16769, Remote: 41001, Pin: "orca/devl"}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := s.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].Pin != "orca/devl" {
+		t.Fatalf("list() = %+v; want one forward pinned orca/devl", all)
+	}
+}
+
+func TestForwardsSavedBeforePinsStillLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "forwards.json")
+	old := `[{"id":"abcd1234","box":"devl","local":3000,"remote":3000}]`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	all, err := forwardStore{path: path}.list()
+	if err != nil {
+		t.Fatalf("list() on a file written before pins existed: %v", err)
+	}
+	if len(all) != 1 || all[0].Pin != "" || all[0].Local != 3000 {
+		t.Fatalf("list() = %+v; want the existing forward with an empty pin", all)
+	}
+}

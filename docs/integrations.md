@@ -70,6 +70,65 @@ calport worktree new devl/cal/fix-login --provider herdr --herdr-session agents
 - **Herdr**: `herdr worktree create`, which also opens a workspace with a pane
   in the new worktree.
 
+### The Orca runtime on a box
+
+`calport orca connect BOX` lets this computer's own Orca app reach an Orca
+runtime running on a box:
+
+```sh
+calport orca connect devl
+```
+
+It installs and starts the runtime as a managed unit on the box if it is not
+already running, tunnels it over the same paired connection calport already
+uses to reach that box, and pairs the local Orca app with it. calport itself
+always reaches the runtime through that existing tunnel over calportd, so
+nothing needs forwarding or opening for calport's own use. But `orca serve`
+has no flag to restrict its bind address, so the runtime listens on every
+interface on the box, not just loopback — anything else on the box's network
+can still reach its port directly. calport does not close that off, and does
+not open it either: restricting the runtime's port, if that matters for a
+given box's network, remains a box-hardening concern that calport neither
+solves nor worsens.
+
+Orca is the one that holds the pairing credential, once it has paired;
+calport itself only ever stores the route (the runtime's identity and the
+local port it tunnels to) in `orca.json` under its state directory. calport
+reads the credential out of the runtime's log and hands it straight to the
+local Orca CLI on this computer, once, to pair — `orca environment add` takes
+it only as a flag, so for that one call it is on this machine's process list
+while the call runs. calport never stores it, never sends it anywhere else,
+and no `calport orca` command prints it, logs it, or puts it in an error.
+
+A box's local port is fixed the first time it pairs, because the pairing
+code the local Orca app stores embeds that port. Reconnecting (`calport orca
+connect BOX` again) restores the tunnel on the same port if it was lost; it
+does not move to a new one, and it leaves a runtime that is already serving
+on that port alone rather than restarting it.
+
+When a pairing stops working and reconnecting keeps failing the same way —
+the box was rebuilt, say, so the runtime answering the saved route is no
+longer the one this computer paired with — `calport orca disconnect BOX` is
+the way out. It drops the saved route,
+pinned port included, and removes the tunnel, so the next `calport orca
+connect BOX` starts over from nothing instead of reusing a route that cannot
+work. It leaves the runtime unit serving on the box (`calport unit rm
+BOX/calport-orca` stops that) and leaves the Orca environment alone; if Orca
+still lists one for the box, remove it in the Orca app.
+
+It does not, however, move a box to a different local port. The pinned port is
+released, but allocation still starts from the same base and nothing checks
+whether a port can be listened on, so a box pinned to a port this computer
+cannot bind will usually be pinned to that same port again. Disconnecting
+fixes a stale route or a runtime identity that no longer matches; it does not
+work around a port that is unavailable here.
+
+`calport orca status BOX` only reports whether
+the runtime this computer already paired with is reachable — it neither
+installs nor pairs anything. `calport orca exec BOX -- ARGS` runs an `orca`
+command against that box's paired runtime, and `calport orca serve BOX`
+starts the runtime without pairing to it.
+
 ### The Cal.com kit
 
 On a box with a Cal.com checkout, `calport kit install BOX/LOCATION` (or **Set

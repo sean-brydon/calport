@@ -12,12 +12,15 @@ import (
 	"github.com/sean-brydon/calport/internal/statefile"
 )
 
-// Forward keeps a local port on the laptop pointed at a port on a box.
+// Forward keeps a local port on the laptop pointed at a port on a box. Pin is
+// a stable key for a forward something else needs to find again after a
+// restart, such as a tool's runtime tunnel; it is empty for ordinary forwards.
 type Forward struct {
 	ID     string `json:"id"`
 	Box    string `json:"box"`
 	Local  int    `json:"local"`
 	Remote int    `json:"remote"`
+	Pin    string `json:"pin,omitempty"`
 }
 
 var errUnknownForward = errors.New("no forward with that id")

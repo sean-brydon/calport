@@ -2,6 +2,8 @@ package doctor
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,5 +40,32 @@ func TestToolCheckMarksMissingRequiredToolsAsFailures(t *testing.T) {
 	}
 	if c := ToolCheck("Tools", "definitely-not-a-real-tool-xyz", "testing", "", false); c.Status != Info {
 		t.Fatalf("missing optional tool: %+v", c)
+	}
+}
+
+func TestToolFindsBinariesOutsidePath(t *testing.T) {
+	brew := t.TempDir()
+	if err := os.WriteFile(filepath.Join(brew, "faketool"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldDirs := extraToolDirs
+	extraToolDirs = []string{brew}
+	t.Cleanup(func() { extraToolDirs = oldDirs })
+	t.Setenv("PATH", t.TempDir())
+
+	path, ok := Tool("faketool")
+	if !ok || path != filepath.Join(brew, "faketool") {
+		t.Fatalf("Tool(faketool) = %q, %v; want the copy in the extra directory", path, ok)
+	}
+}
+
+func TestToolReportsMissingToolAsAbsent(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	oldDirs := extraToolDirs
+	extraToolDirs = []string{t.TempDir()}
+	t.Cleanup(func() { extraToolDirs = oldDirs })
+
+	if path, ok := Tool("definitely-not-installed"); ok {
+		t.Fatalf("Tool = %q, true; want absent", path)
 	}
 }

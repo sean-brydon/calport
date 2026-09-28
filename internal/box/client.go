@@ -147,6 +147,38 @@ func (c *Client) RemoveShare(ctx context.Context, id string) (out Share, err err
 	return out, c.call(ctx, http.MethodDelete, "/v1/shares/"+url.PathEscape(id), nil, &out)
 }
 
+func (c *Client) Units(ctx context.Context) (out []Unit, err error) {
+	return out, c.call(ctx, http.MethodGet, "/v1/units", nil, &out)
+}
+
+func (c *Client) AddUnit(ctx context.Context, req UnitRequest) (out Unit, err error) {
+	return out, c.call(ctx, http.MethodPost, "/v1/units", req, &out)
+}
+
+func (c *Client) Unit(ctx context.Context, name string) (out Unit, err error) {
+	return out, c.call(ctx, http.MethodGet, "/v1/units/"+url.PathEscape(name), nil, &out)
+}
+
+func (c *Client) RemoveUnit(ctx context.Context, name string) (out Unit, err error) {
+	return out, c.call(ctx, http.MethodDelete, "/v1/units/"+url.PathEscape(name), nil, &out)
+}
+
+// UnitLog returns the end of a unit's log. A unit's output can contain
+// credentials, so callers parse it and must not log what they read.
+func (c *Client) UnitLog(ctx context.Context, name string, limit int64) ([]byte, error) {
+	var out struct {
+		Log []byte `json:"log"`
+	}
+	path := fmt.Sprintf("/v1/units/%s/log?limit=%d", url.PathEscape(name), limit)
+	if err := c.call(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Log == nil {
+		out.Log = []byte{}
+	}
+	return out.Log, nil
+}
+
 func (c *Client) SetScripts(ctx context.Context, location, setup, archive string) (out Location, err error) {
 	return out, c.call(ctx, http.MethodPut, "/v1/locations/"+url.PathEscape(location)+"/scripts", map[string]string{"setup": setup, "archive": archive}, &out)
 }

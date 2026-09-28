@@ -33,13 +33,14 @@ func (a *Agent) api(stop context.CancelFunc) http.Handler {
 			Box    string `json:"box"`
 			Local  int    `json:"local"`
 			Remote int    `json:"remote"`
+			Pin    string `json:"pin"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request")
 			return
 		}
 		a.sync()
-		f, err := a.addForward(a.runCtx(), req.Box, req.Local, req.Remote)
+		f, err := a.addForward(a.runCtx(), req.Box, req.Local, req.Remote, req.Pin)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

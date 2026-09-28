@@ -33,15 +33,24 @@ type Check struct {
 	Fix string `json:"fix,omitempty"`
 }
 
-// Tool finds an executable on PATH or in ~/.local/bin, where Orca, Herdr,
-// cloudflared, and agent CLIs install themselves.
+// extraToolDirs are searched after PATH. macOS GUI apps inherit a minimal
+// PATH, so a Homebrew install is invisible to a check that trusts PATH alone.
+// A variable so tests can redirect it.
+var extraToolDirs = []string{"/opt/homebrew/bin", "/usr/local/bin"}
+
+// Tool finds an executable on PATH, in ~/.local/bin, or in a Homebrew
+// prefix, where Orca, Herdr, cloudflared, and agent CLIs install themselves.
 func Tool(name string) (string, bool) {
 	if p, err := exec.LookPath(name); err == nil {
 		return p, true
 	}
+	dirs := extraToolDirs
 	if home, err := os.UserHomeDir(); err == nil {
-		p := filepath.Join(home, ".local", "bin", name)
-		if _, err := os.Stat(p); err == nil {
+		dirs = append([]string{filepath.Join(home, ".local", "bin")}, dirs...)
+	}
+	for _, dir := range dirs {
+		p := filepath.Join(dir, name)
+		if info, err := os.Stat(p); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
 			return p, true
 		}
 	}

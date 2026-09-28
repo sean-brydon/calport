@@ -100,6 +100,12 @@ func Render(s Spec) ([]byte, error) {
 		for _, k := range keys {
 			fmt.Fprintf(&b, "Environment=%s\n", systemdQuote(k+"="+s.Env[k]))
 		}
+		// systemd 240+. Keeping a unit's output in a file calportd owns keeps
+		// credentials a program prints out of the journal, which is readable
+		// by the box user and persists.
+		if s.LogPath != "" {
+			fmt.Fprintf(&b, "StandardOutput=append:%s\nStandardError=append:%s\n", s.LogPath, s.LogPath)
+		}
 		b.WriteString("Restart=on-failure\nRestartSec=5\n")
 		if s.KeepChildren {
 			b.WriteString("KillMode=process\n")
@@ -141,6 +147,25 @@ func Installed(s Spec) bool {
 	}
 	want, err := Render(s)
 	return err == nil && bytes.Equal(have, want)
+}
+
+// InstalledByName reports whether a unit file with this name exists at all,
+// whatever it contains.
+//
+// This exists alongside Installed because the two answer different questions
+// and neither can stand in for the other. Installed is for a caller that holds
+// the Spec it is about to write and wants to know "is the unit on disk already
+// exactly mine?". InstalledByName is for a caller that holds only a name -
+// calportd's managed units are named over the wire, and the Spec they were
+// written from lives on the box - where an exact compare would render an empty
+// Spec and report every installed unit as missing.
+func InstalledByName(name string) bool {
+	path, err := unitPath(Spec{Name: name})
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(path)
+	return err == nil
 }
 
 // Install writes the unit and (re)loads it, which starts the service.

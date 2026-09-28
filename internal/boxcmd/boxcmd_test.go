@@ -103,3 +103,26 @@ func TestUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestUnitsListsWhatTheBoxReports(t *testing.T) {
+	reply := `[{"name":"calport-orca","state":"installed","log_path":"/home/sean/.config/calport/units/calport-orca.log"}]`
+	rec, out := run(t, reply, "units")
+	if rec.path != "/v1/units" {
+		t.Fatalf("called %q; want /v1/units", rec.path)
+	}
+	if !strings.Contains(out, "calport-orca") || !strings.Contains(out, "installed") {
+		t.Fatalf("units output = %q; want the unit and its state", out)
+	}
+}
+
+func TestUnitAddSendsTheCommandAfterDoubleDash(t *testing.T) {
+	reply := `{"name":"calport-orca","state":"installed","log_path":"/tmp/calport-orca.log"}`
+	rec, _ := run(t, reply, "unit", "add", "calport-orca", "--", "orca", "serve")
+	if rec.body["program"] != "orca" {
+		t.Fatalf("program = %v; want orca", rec.body["program"])
+	}
+	args, ok := rec.body["args"].([]any)
+	if !ok || len(args) != 1 || args[0] != "serve" {
+		t.Fatalf("args = %v; want [serve]", rec.body["args"])
+	}
+}

@@ -160,3 +160,36 @@ func TestKeepChildrenSurvivesServiceRestarts(t *testing.T) {
 		t.Fatalf("plist does not keep children:\n%s", plist)
 	}
 }
+
+func TestLinuxUnitsWriteOutputToTheLogPath(t *testing.T) {
+	stub(t, "linux")
+	unit, err := Render(Spec{
+		Name:        "calport-orca",
+		Description: "Orca runtime",
+		Program:     "/usr/bin/orca",
+		Args:        []string{"serve"},
+		LogPath:     "/home/alex/.config/calport/units/calport-orca.log",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"StandardOutput=append:/home/alex/.config/calport/units/calport-orca.log",
+		"StandardError=append:/home/alex/.config/calport/units/calport-orca.log",
+	} {
+		if !strings.Contains(string(unit), want) {
+			t.Fatalf("unit is missing %q:\n%s", want, unit)
+		}
+	}
+}
+
+func TestLinuxUnitsWithoutALogPathRedirectNothing(t *testing.T) {
+	stub(t, "linux")
+	unit, err := Render(Spec{Name: "calport-agent", Program: "/usr/bin/calport", Args: []string{"agent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(unit), "StandardOutput=") {
+		t.Fatalf("unit redirects output with no LogPath set:\n%s", unit)
+	}
+}

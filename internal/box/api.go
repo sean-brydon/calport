@@ -44,6 +44,8 @@ type Box struct {
 	LogDir string
 	// Kit installs the Cal.com worktree kit; nil where it cannot run.
 	Kit *kit.Installer
+	// Units runs calportd's managed units; nil where they cannot run.
+	Units *Units
 	// AgentStates, when running, says which agents wait for someone.
 	AgentStates *AgentStates
 }
@@ -82,6 +84,11 @@ func (b *Box) Mount(s *wire.Server) {
 	route("GET /v1/shares", b.listShares)
 	route("POST /v1/shares", b.addShare)
 	route("DELETE /v1/shares/{id}", b.removeShare)
+	route("GET /v1/units", b.listUnits)
+	route("POST /v1/units", b.addUnit)
+	route("GET /v1/units/{name}", b.getUnit)
+	route("DELETE /v1/units/{name}", b.removeUnit)
+	route("GET /v1/units/{name}/log", b.unitLog)
 	route("GET /v1/stats", b.handleStats)
 	route("GET /v1/kit", b.kitStatus)
 	route("POST /v1/kit/reclaim", b.handleReclaim)
@@ -111,7 +118,7 @@ func statusFor(err error) int {
 	switch {
 	case errors.As(err, &he):
 		return he.status
-	case errors.Is(err, ErrUnknownLocation), errors.Is(err, ErrUnknownWorktree), errors.Is(err, ErrUnknownSession), errors.Is(err, ErrUnknownShare):
+	case errors.Is(err, ErrUnknownLocation), errors.Is(err, ErrUnknownWorktree), errors.Is(err, ErrUnknownSession), errors.Is(err, ErrUnknownShare), errors.Is(err, ErrUnknownUnit):
 		return http.StatusNotFound
 	case errors.Is(err, ErrSessionExists):
 		return http.StatusConflict
@@ -449,6 +456,95 @@ func (b *Box) removeShare(w http.ResponseWriter, r *http.Request) error {
 	}
 	b.publish(r, "share.stopped", map[string]any{"id": sh.ID, "port": sh.Port, "url": sh.URL})
 	writeJSON(w, sh)
+	return nil
+}
+
+func (b *Box) units() (*Units, error) {
+	if b.Units == nil {
+		return nil, badRequest("this box cannot run managed units")
+	}
+	return b.Units, nil
+}
+
+func (b *Box) listUnits(w http.ResponseWriter, r *http.Request) error {
+	u, err := b.units()
+	if err != nil {
+		return err
+	}
+	all, err := u.List()
+	if err != nil {
+		return err
+	}
+	writeJSON(w, all)
+	return nil
+}
+
+func (b *Box) addUnit(w http.ResponseWriter, r *http.Request) error {
+	u, err := b.units()
+	if err != nil {
+		return err
+	}
+	var req UnitRequest
+	if err := decode(r, &req); err != nil {
+		return err
+	}
+	unit, err := u.Install(r.Context(), req)
+	if err != nil {
+		return err
+	}
+	// The unit's name only; its arguments can carry credentials.
+	b.publish(r, "unit.started", map[string]any{"name": unit.Name})
+	writeJSON(w, unit)
+	return nil
+}
+
+func (b *Box) getUnit(w http.ResponseWriter, r *http.Request) error {
+	u, err := b.units()
+	if err != nil {
+		return err
+	}
+	unit, err := u.Get(r.PathValue("name"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, unit)
+	return nil
+}
+
+func (b *Box) removeUnit(w http.ResponseWriter, r *http.Request) error {
+	u, err := b.units()
+	if err != nil {
+		return err
+	}
+	unit, err := u.Remove(r.PathValue("name"))
+	if err != nil {
+		return err
+	}
+	b.publish(r, "unit.stopped", map[string]any{"name": unit.Name})
+	writeJSON(w, unit)
+	return nil
+}
+
+func (b *Box) unitLog(w http.ResponseWriter, r *http.Request) error {
+	u, err := b.units()
+	if err != nil {
+		return err
+	}
+	limit := int64(1 << 20)
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 || n > 1<<20 {
+			return badRequest("limit must be between 1 and %d", 1<<20)
+		}
+		limit = n
+	}
+	out, err := u.Tail(r.PathValue("name"), limit)
+	if err != nil {
+		return err
+	}
+	// A []byte marshals as base64, so a log holding arbitrary bytes survives
+	// the round trip that a plain string would corrupt.
+	writeJSON(w, map[string][]byte{"log": out})
 	return nil
 }
 

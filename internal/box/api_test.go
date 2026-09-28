@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,7 +39,9 @@ func servedBox(t *testing.T) (*wire.Client, *events.Bus) {
 	}
 	sessions := testSessions(t)
 	bus := &events.Bus{}
-	(&Box{Name: "devbox", Locations: NewLocations(filepath.Join(dir, "locations.json")), Sessions: sessions, Shares: &Shares{}, Events: bus}).Mount(srv)
+	units := &Units{Dir: filepath.Join(dir, "units")}
+	units.svc, _ = fakeService() // never install a real unit from a test
+	(&Box{Name: "devbox", Locations: NewLocations(filepath.Join(dir, "locations.json")), Sessions: sessions, Shares: &Shares{}, Units: units, Events: bus}).Mount(srv)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +176,55 @@ func TestErrorsMapToStatuses(t *testing.T) {
 		if got := call(t, c, tc.method, tc.path, "", tc.body, nil); got != tc.want {
 			t.Errorf("%s %s = %d, want %d", tc.method, tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestUnitRoutesInstallListAndRemove(t *testing.T) {
+	wc, _ := servedBox(t)
+	c := NewClient(wc)
+	ctx := context.Background()
+
+	got, err := c.AddUnit(ctx, UnitRequest{Name: "calport-probe", Program: "/bin/sh", Args: []string{"-c", "true"}})
+	if err != nil || got.Name != "calport-probe" {
+		t.Fatalf("AddUnit() = %+v, %v", got, err)
+	}
+	all, err := c.Units(ctx)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("Units() = %+v, %v; want one unit", all, err)
+	}
+	if _, err := c.RemoveUnit(ctx, "calport-probe"); err != nil {
+		t.Fatalf("RemoveUnit() = %v", err)
+	}
+}
+
+func TestUnitRoutesReportAMissingUnitAsNotFound(t *testing.T) {
+	wc, _ := servedBox(t)
+	if _, err := NewClient(wc).Unit(context.Background(), "calport-missing"); err == nil {
+		t.Fatal("Unit() on a missing unit succeeded; want an error")
+	}
+}
+
+func TestUnitLogRoundTripsArbitraryBytes(t *testing.T) {
+	wc, _ := servedBox(t)
+	c := NewClient(wc)
+	ctx := context.Background()
+	unit, err := c.AddUnit(ctx, UnitRequest{Name: "calport-probe", Program: "/bin/sh", Args: []string{"-c", "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Invalid UTF-8, an embedded NUL, and a newline: a string would mangle
+	// the first, truncate at the second, and a naive line reader would split
+	// on the third.
+	want := []byte("before\xff\xfe\x00after\ncredential=s3cr3t")
+	if err := os.WriteFile(unit.LogPath, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.UnitLog(ctx, "calport-probe", 1<<20)
+	if err != nil {
+		t.Fatalf("UnitLog() = %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("UnitLog() = %q, want %q", got, want)
 	}
 }
 
