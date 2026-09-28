@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -212,8 +213,14 @@ func (u *Units) Tail(name string, limit int64) ([]byte, error) {
 		}
 	}
 	buf := make([]byte, min(info.Size(), limit))
-	n, err := f.Read(buf)
-	if err != nil && n == 0 {
+	// A single Read is not guaranteed to fill buf, and the caller keeps the
+	// last parseable record from this tail: a short read that clips the final
+	// line would silently hand back a stale or truncated record. ReadFull
+	// retries until buf is full or the file runs out. If the file shrank
+	// between Stat and Read, that end-of-file is not an error here: return
+	// whatever bytes were actually read.
+	n, err := io.ReadFull(f, buf)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 	return buf[:n], nil

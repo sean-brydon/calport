@@ -130,3 +130,20 @@ func TestTailReturnsTheEndOfALargeLog(t *testing.T) {
 		t.Fatalf("Tail() = %q; want the last 32 bytes, which hold the last record", out)
 	}
 }
+
+func TestTailReturnsWhateverIsThereWhenTheLogIsSmallerThanTheLimit(t *testing.T) {
+	dir := t.TempDir()
+	svc, _ := fakeService()
+	u := &Units{Dir: dir, svc: svc}
+	body := "short log\n"
+	if err := os.WriteFile(filepath.Join(dir, "calport-probe.log"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := u.Tail("calport-probe", 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != body {
+		t.Fatalf("Tail() = %q; want the whole file %q, not an error or a short read", out, body)
+	}
+}
