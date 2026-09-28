@@ -162,7 +162,7 @@ func (c CLI) Exec(ctx context.Context, environment string, args []string) ([]byt
 	cmd.Env = filteredEnv(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("the Orca command failed on this runtime")
+		return out, fmt.Errorf("the Orca command failed on this runtime")
 	}
 	return out, nil
 }
