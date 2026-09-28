@@ -22,7 +22,6 @@ type Unit struct {
 	Name    string `json:"name"`
 	State   string `json:"state"`
 	LogPath string `json:"log_path"`
-	Error   string `json:"error,omitempty"`
 }
 
 type UnitRequest struct {
