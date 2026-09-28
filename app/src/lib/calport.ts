@@ -114,9 +114,22 @@ export interface KitInstall {
   routed: boolean;
 }
 
-// The hooks Orca runs for a Cal.com repository once the kit is installed.
-export const KIT_SETUP_HOOK = '"$HOME/.local/bin/cal-worktree" setup';
-export const KIT_ARCHIVE_HOOK = '"$HOME/.local/bin/cal-archive"';
+// KitTool is whether a worktree tool runs the kit's hooks for its checkout.
+export interface KitTool {
+  tool: string;
+  name: string;
+  state: "configured" | "missing" | "tracked" | "skipped";
+  file?: string;
+  installed: boolean;
+  opt_in?: boolean;
+  detail?: string;
+}
+
+export interface KitTools {
+  root: string;
+  tools: KitTool[];
+  written?: string[];
+}
 
 export interface Service {
   location: string;
@@ -299,6 +312,10 @@ export const calport = {
   kit: (box: string) => json<KitStatus>(["kit", box]),
   stats: (box: string) => json<BoxStats>(["stats", box]),
   installKit: (box: string, location: string) => json<KitInstall>(["kit", "install", `${box}/${location}`]),
+  kitTools: (box: string, location: string) => json<KitTools>(["kit", "tools", `${box}/${location}`]),
+  // setUpKitTools with no tools sets up every missing one that is not opt-in.
+  setUpKitTools: (box: string, location: string, tools: string[] = []) =>
+    json<KitTools>(["kit", "tools", `${box}/${location}`, "--setup", ...(tools.length ? ["--tool", tools.join(",")] : [])]),
   info: async (box: string) => JSON.parse(await run(["info", box])) as BoxInfo,
   importOrca: (box: string) => run(["location", "import", box, "orca"]),
   openWorktree: (box: string, location: string, worktree: string, tool: "orca" | "herdr", agent?: string) =>

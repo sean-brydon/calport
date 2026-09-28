@@ -134,7 +134,8 @@ func addSSH(l laptop, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(indent(string(out)))
+	// calportd install ends with "Next: calportd pair", which this command does itself.
+	fmt.Print(indent(strings.Replace(string(out), "Next: calportd pair\n", "", 1)))
 
 	pair := "sleep 1; ~/.local/bin/calportd pair"
 	if *address != "" {
