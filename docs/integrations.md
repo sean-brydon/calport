@@ -70,6 +70,35 @@ calport worktree new devl/cal/fix-login --provider herdr --herdr-session agents
 - **Herdr**: `herdr worktree create`, which also opens a workspace with a pane
   in the new worktree.
 
+### The Orca runtime on a box
+
+`calport orca connect BOX` lets this computer's own Orca app reach an Orca
+runtime running on a box:
+
+```sh
+calport orca connect devl
+```
+
+It installs and starts the runtime as a managed unit on the box if it is not
+already running, tunnels it over the same paired connection calport already
+uses to reach that box, and pairs the local Orca app with it. The runtime
+binds to the box's loopback interface and is reached only through calportd's
+tunnel, so nothing needs opening in the box's firewall.
+
+Orca is the one that holds the pairing credential, once it has paired;
+calport itself only ever stores the route (the runtime's identity and the
+local port it tunnels to) in `orca.json` under its state directory. That
+credential is never printed by any `calport orca` command and never belongs
+in a command, a config file, or a chat message — pairing happens once, inside
+Orca.
+
+A box's local port is fixed the first time it pairs, because the pairing
+code the local Orca app stores embeds that port. Reconnecting (`calport orca
+connect BOX` again, or `calport orca status BOX`) restores the tunnel on the
+same port if it was lost; it does not move to a new one. `calport orca exec
+BOX -- ARGS` runs an `orca` command against that box's paired runtime, and
+`calport orca serve BOX` starts the runtime without pairing to it.
+
 ### The Cal.com kit
 
 On a box with a Cal.com checkout, `calport kit install BOX/LOCATION` (or **Set

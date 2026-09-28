@@ -44,6 +44,7 @@ make all                                  # calport, calportd, and Linux daemons
 bin/calport add ssh my-box                # install on a box over SSH once, and pair
 bin/calport ports my-box                  # what is running there
 bin/calport url my-box 3000               # → http://3000.my-box.localhost:1355/
+bin/calport orca connect devl             # this computer's Orca app now reaches devl
 ```
 
 A box on a tailnet this laptop is not joined to (say a personal one, while
