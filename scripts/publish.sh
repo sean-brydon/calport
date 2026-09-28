@@ -36,7 +36,7 @@ if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
 fi
 export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 
-echo "Setting version $version…"
+echo "Setting version ${version}…"
 python3 - "$version" <<'PY'
 import json, re, sys
 v = sys.argv[1]
