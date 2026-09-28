@@ -111,7 +111,7 @@ func statusFor(err error) int {
 	switch {
 	case errors.As(err, &he):
 		return he.status
-	case errors.Is(err, ErrUnknownLocation), errors.Is(err, ErrUnknownWorktree), errors.Is(err, ErrUnknownSession), errors.Is(err, ErrUnknownShare):
+	case errors.Is(err, ErrUnknownLocation), errors.Is(err, ErrUnknownWorktree), errors.Is(err, ErrUnknownSession), errors.Is(err, ErrUnknownShare), errors.Is(err, ErrUnknownUnit):
 		return http.StatusNotFound
 	case errors.Is(err, ErrSessionExists):
 		return http.StatusConflict
