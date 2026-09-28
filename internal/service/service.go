@@ -100,6 +100,12 @@ func Render(s Spec) ([]byte, error) {
 		for _, k := range keys {
 			fmt.Fprintf(&b, "Environment=%s\n", systemdQuote(k+"="+s.Env[k]))
 		}
+		// systemd 240+. Keeping a unit's output in a file calportd owns keeps
+		// credentials a program prints out of the journal, which is readable
+		// by the box user and persists.
+		if s.LogPath != "" {
+			fmt.Fprintf(&b, "StandardOutput=append:%s\nStandardError=append:%s\n", s.LogPath, s.LogPath)
+		}
 		b.WriteString("Restart=on-failure\nRestartSec=5\n")
 		if s.KeepChildren {
 			b.WriteString("KillMode=process\n")
