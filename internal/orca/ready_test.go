@@ -55,37 +55,64 @@ func TestParseReadyKeepsTheLastRecord(t *testing.T) {
 }
 
 func TestParseReadyRejectsUnusableRecords(t *testing.T) {
-	cases := map[string]func(m map[string]any){
-		"wrong schema":            func(m map[string]any) { m["schemaVersion"] = 2 },
-		"no runtime id":           func(m map[string]any) { m["runtimeId"] = "" },
-		"pairing unavailable":     func(m map[string]any) { m["pairing"].(map[string]any)["available"] = false },
-		"no pairing url":          func(m map[string]any) { m["pairing"].(map[string]any)["url"] = "" },
-		"pairing endpoint differs": func(m map[string]any) {
-			m["pairing"].(map[string]any)["endpoint"] = "ws://127.0.0.1:16770"
-		},
-		"advertised not loopback": func(m map[string]any) { m["advertisedEndpoint"] = "ws://example.com:16769" },
-		"advertised has userinfo": func(m map[string]any) { m["advertisedEndpoint"] = "ws://secret@127.0.0.1:16769" },
-		"advertised has path":     func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:16769/path" },
-		"advertised has query":    func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:16769?a=b" },
-		"advertised has fragment": func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:16769#f" },
-		"advertised not ws":       func(m map[string]any) { m["advertisedEndpoint"] = "http://127.0.0.1:16769" },
-		"advertised port zero":    func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:0" },
-		"advertised port too big": func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:70000" },
-		"bound not ws":            func(m map[string]any) { m["boundEndpoint"] = "http://127.0.0.1:41001" },
-		"bound port too big":      func(m map[string]any) { m["boundEndpoint"] = "ws://0.0.0.0:70000" },
+	// wantErr pins each case to the specific check that must reject it, not
+	// merely to "some error" — otherwise a validation-ordering regression
+	// (e.g. a case starting to fail on the wrong check) would stay green.
+	type rejection struct {
+		edit    func(m map[string]any)
+		wantErr string
 	}
-	for name, edit := range cases {
+	cases := map[string]rejection{
+		"wrong schema":        {func(m map[string]any) { m["schemaVersion"] = 2 }, "schema version"},
+		"no runtime id":       {func(m map[string]any) { m["runtimeId"] = "" }, "reported no runtime id"},
+		"pairing unavailable": {func(m map[string]any) { m["pairing"].(map[string]any)["available"] = false }, "not offering to pair"},
+		"no pairing url":      {func(m map[string]any) { m["pairing"].(map[string]any)["url"] = "" }, "not offering to pair"},
+		"pairing endpoint differs": {
+			func(m map[string]any) { m["pairing"].(map[string]any)["endpoint"] = "ws://127.0.0.1:16770" },
+			"different endpoint than it advertises",
+		},
+		"advertised not loopback": {func(m map[string]any) { m["advertisedEndpoint"] = "ws://example.com:16769" }, "not a loopback address"},
+		"advertised has userinfo": {func(m map[string]any) { m["advertisedEndpoint"] = "ws://secret@127.0.0.1:16769" }, "carries userinfo"},
+		"advertised has path":     {func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:16769/path" }, "carries a path"},
+		"advertised has query":    {func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:16769?a=b" }, "carries a query or fragment"},
+		"advertised has fragment": {func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:16769#f" }, "carries a query or fragment"},
+		"advertised not ws": {
+			func(m map[string]any) { m["advertisedEndpoint"] = "http://127.0.0.1:16769" },
+			"advertised endpoint is unusable: its scheme is not ws",
+		},
+		"advertised port zero": {
+			func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:0" },
+			"advertised endpoint is unusable: its port is not between 1 and 65535",
+		},
+		"advertised port too big": {
+			func(m map[string]any) { m["advertisedEndpoint"] = "ws://127.0.0.1:70000" },
+			"advertised endpoint is unusable: its port is not between 1 and 65535",
+		},
+		"bound not ws": {
+			func(m map[string]any) { m["boundEndpoint"] = "http://127.0.0.1:41001" },
+			"bound endpoint is unusable: its scheme is not ws",
+		},
+		"bound port too big": {
+			func(m map[string]any) { m["boundEndpoint"] = "ws://0.0.0.0:70000" },
+			"bound endpoint is unusable: its port is not between 1 and 65535",
+		},
+	}
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			line := record(t, func(m map[string]any) {
-				edit(m)
+				tc.edit(m)
 				// A changed advertised endpoint must stay consistent with
 				// pairing.endpoint, so each case fails for its own reason.
 				if name != "pairing endpoint differs" {
 					m["pairing"].(map[string]any)["endpoint"] = m["advertisedEndpoint"]
 				}
 			})
-			if _, err := ParseReady([]byte(line), 16769); err == nil {
+			_, err := ParseReady([]byte(line), 16769)
+			if err == nil {
 				t.Fatalf("ParseReady accepted a record with %s", name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ParseReady error = %q; want it to contain %q", err.Error(), tc.wantErr)
 			}
 		})
 	}
