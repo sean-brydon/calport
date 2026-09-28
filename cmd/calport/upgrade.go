@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -13,9 +14,14 @@ import (
 // upgrade replaces a box's daemon with the build shipped beside this calport,
 // over calport's own connection: no SSH, and agent sessions keep running.
 func upgrade(l laptop, args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: calport upgrade BOX")
+	var check bool
+	fs, asJSON, err := flags("upgrade", args, func(fs *flag.FlagSet) {
+		fs.BoolVar(&check, "check", false, "only report whether the box runs an older daemon")
+	})
+	if err != nil || fs.NArg() != 1 {
+		return errors.New("usage: calport upgrade BOX [--check [--json]]")
 	}
+	args = fs.Args()
 	wc, err := l.boxClient(args[0])
 	if err != nil {
 		return err
@@ -37,6 +43,17 @@ func upgrade(l laptop, args []string) error {
 		return err
 	}
 	next := box.BuildID(binary)
+	if check {
+		if asJSON {
+			return printJSON(map[string]any{"box": args[0], "current": info.Build, "available": next, "outdated": next != info.Build})
+		}
+		if next == info.Build {
+			fmt.Printf("%s runs this build (%s).\n", args[0], next)
+		} else {
+			fmt.Printf("%s runs %s; this calport ships %s. Upgrade with: calport upgrade %s\n", args[0], info.Build, next, args[0])
+		}
+		return nil
+	}
 	if next == info.Build {
 		fmt.Printf("%s already runs this build (%s).\n", args[0], next)
 		return nil

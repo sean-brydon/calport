@@ -193,7 +193,7 @@ export class CalportError extends Error {}
 const SIDECAR = "binaries/calport";
 
 // Outside the Tauri app there is no sidecar; answer from sample data instead.
-const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // run executes the bundled calport with args and returns its stdout. Errors
 // carry calport's own message, which is written for people.
@@ -291,6 +291,7 @@ export const calport = {
     run(["add", "ssh", host, ...(name ? ["--name", name] : []), ...(network ? ["--network", network] : [])]),
   forget: (box: string) => run(["forget", box]),
   upgrade: (box: string) => run(["upgrade", box]),
+  upgradeCheck: (box: string) => json<{ box: string; current: string; available: string; outdated: boolean }>(["upgrade", box, "--check"]),
   setupPort80: () => run(["setup", "port80"]),
   removePort80: () => run(["setup", "port80", "--remove"]),
   doctor: (box?: string) => json<Check[]>(box ? ["doctor", box] : ["doctor"]),

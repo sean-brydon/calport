@@ -1,18 +1,34 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window may run the bundled calport binary and open web links; nothing else.",
-  "windows": ["main"],
+  "description": "The main window may run the bundled calport binary, open web links, and install signed updates of itself; nothing else.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "opener:default",
+    "updater:default",
+    "process:allow-restart",
     {
       "identifier": "shell:allow-execute",
-      "allow": [{ "name": "binaries/calport", "sidecar": true, "args": true }]
+      "allow": [
+        {
+          "name": "binaries/calport",
+          "sidecar": true,
+          "args": true
+        }
+      ]
     },
     {
       "identifier": "shell:allow-spawn",
-      "allow": [{ "name": "binaries/calport", "sidecar": true, "args": true }]
+      "allow": [
+        {
+          "name": "binaries/calport",
+          "sidecar": true,
+          "args": true
+        }
+      ]
     },
     "shell:allow-kill"
   ]

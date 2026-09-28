@@ -11,6 +11,8 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "@/components/ui/toast";
+import { useAppUpdate } from "@/hooks/use-app-update";
+import { useBoxUpgrades } from "@/hooks/use-box-upgrades";
 import { useEvents, useLoad, usePoll } from "@/hooks/use-calport";
 import { AUTO_AGENT, calport, type Lifecycle } from "@/lib/calport";
 import { lifecycleOf, notice } from "@/lib/format";
@@ -76,6 +78,8 @@ function Shell() {
   });
 
   const boxes = status.data?.boxes ?? [];
+  const appUpdate = useAppUpdate();
+  useBoxUpgrades(boxes, changed);
   // First run: guide someone with no boxes through setup, and keep the guide
   // up until they finish it even after their first box connects.
   useEffect(() => {
@@ -142,7 +146,7 @@ function Shell() {
       />
       <SidebarInset>
         {selected === SETTINGS ? (
-          <SettingsView status={status.data} networks={networks.data ?? []} onNetworksChanged={networks.reload} onChanged={changed} />
+          <SettingsView status={status.data} networks={networks.data ?? []} appUpdate={appUpdate} onNetworksChanged={networks.reload} onChanged={changed} />
         ) : box ? (
           <BoxView
             key={box.name}

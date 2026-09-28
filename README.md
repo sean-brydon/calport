@@ -83,6 +83,21 @@ make app-build      # build Calport.app
 make release        # every install.sh asset + SHA256SUMS in dist/
 ```
 
+### Releasing
+
+```sh
+make publish VERSION=0.3.0 NOTES="What changed"
+```
+
+From a clean `main`, this bumps the version, builds the CLI and daemons, builds
+the app and signs its update, writes `latest.json`, tags, and creates the
+GitHub release. Installed apps check that feed at launch and every few hours,
+verify the signature against the public key in `tauri.conf.json`, and offer
+**Restart to update**; afterwards they offer to upgrade any box running an
+older calportd. The private key is read from `TAURI_SIGNING_PRIVATE_KEY`, from
+1Password with `CALPORT_SIGNING_KEY_OP=op://…`, or from `~/.tauri/calport.key`.
+Anyone with it can ship updates to every install, so keep it in 1Password.
+
 It is a view over the bundled `calport` binary: every action runs it with
 `--json`, so the app and the CLI never disagree. In a plain browser
 (`cd app && pnpm dev`) it runs on sample data, for working on the UI; add

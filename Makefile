@@ -54,3 +54,9 @@ release:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST)/calportd-linux-amd64 ./cmd/calportd
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST)/calportd-linux-arm64 ./cmd/calportd
 	cd $(DIST) && shasum -a 256 calport-* calportd-* > SHA256SUMS
+
+# publish releases VERSION from this Mac: signed app update, CLI, daemons and
+# the latest.json feed installed apps update from. See scripts/publish.sh.
+.PHONY: publish
+publish:
+	VERSION=$(VERSION) NOTES="$(NOTES)" scripts/publish.sh

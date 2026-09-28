@@ -14,12 +14,15 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { toastManager } from "@/components/ui/toast";
+import type { AppUpdate } from "@/hooks/use-app-update";
 import { useLoad } from "@/hooks/use-calport";
+import { appVersion } from "@/lib/app-update";
 import { AUTO_AGENT, calport, type Network, type Status } from "@/lib/calport";
 
 interface SettingsViewProps {
   status: Status;
   networks: Network[];
+  appUpdate: AppUpdate;
   onNetworksChanged: () => void;
   onChanged: () => void;
 }
@@ -28,7 +31,7 @@ function failure(title: string, err: unknown) {
   toastManager.add({ title, description: err instanceof Error ? err.message : String(err), type: "error" });
 }
 
-export function SettingsView({ status, networks, onNetworksChanged, onChanged }: SettingsViewProps) {
+export function SettingsView({ status, networks, appUpdate, onNetworksChanged, onChanged }: SettingsViewProps) {
   const checks = useLoad(() => calport.doctor(), [status.proxy.url_port, status.routes.length]);
   return (
     <div className="flex min-h-svh flex-col">
@@ -37,6 +40,7 @@ export function SettingsView({ status, networks, onNetworksChanged, onChanged }:
         <h1 className="font-heading font-semibold text-lg">Settings</h1>
       </header>
       <div className="flex max-w-3xl flex-col gap-6 px-6 py-5">
+        <Updates appUpdate={appUpdate} />
         <StartAtLogin onChanged={checks.reload} />
         <ShortURLs urlPort={status.proxy.url_port || status.proxy.port} onChanged={onChanged} />
         <Routes status={status} onChanged={onChanged} />
@@ -67,6 +71,41 @@ export function SettingsView({ status, networks, onNetworksChanged, onChanged }:
         </Card>
       </div>
     </div>
+  );
+}
+
+function Updates({ appUpdate }: { appUpdate: AppUpdate }) {
+  const version = useLoad(() => appVersion(), []);
+  const { update, checking, installing, error, checkNow, install } = appUpdate;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          Updates
+          {update ? <Badge variant="info">{update.version} available</Badge> : <Badge variant="secondary">{version.data ?? "…"}</Badge>}
+        </CardTitle>
+        <CardDescription>
+          {update
+            ? "A signed update is ready. Installing restarts the app; boxes, forwards and URLs keep running."
+            : error
+              ? `Could not check for updates: ${error}`
+              : "Calport checks for signed updates when it starts and every few hours. After updating, it offers to upgrade your boxes too."}
+        </CardDescription>
+        <CardAction>
+          {update ? (
+            <Button size="sm" disabled={installing} onClick={install}>
+              {installing && <Spinner />}
+              Restart to update
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" disabled={checking} onClick={checkNow}>
+              {checking && <Spinner />}
+              Check now
+            </Button>
+          )}
+        </CardAction>
+      </CardHeader>
+    </Card>
   );
 }
 
