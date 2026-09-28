@@ -555,7 +555,7 @@ func (a *Agent) retryFailedForwards(ctx context.Context) {
 	}
 }
 
-func (a *Agent) addForward(ctx context.Context, box string, local, remote int) (Forward, error) {
+func (a *Agent) addForward(ctx context.Context, box string, local, remote int, pin string) (Forward, error) {
 	if local < 1 || local > 65535 || remote < 1 || remote > 65535 {
 		return Forward{}, errors.New("ports must be between 1 and 65535")
 	}
@@ -566,7 +566,7 @@ func (a *Agent) addForward(ctx context.Context, box string, local, remote int) (
 	if err != nil {
 		return Forward{}, err
 	}
-	f, err := a.forwards.add(Forward{Box: box, Local: local, Remote: remote})
+	f, err := a.forwards.add(Forward{Box: box, Local: local, Remote: remote, Pin: pin})
 	if err != nil {
 		for _, ln := range lns {
 			ln.Close()

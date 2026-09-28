@@ -53,8 +53,14 @@ func (c *Client) Refresh(ctx context.Context) (Status, error) {
 }
 
 func (c *Client) AddForward(ctx context.Context, box string, local, remote int) (Forward, error) {
+	return c.AddPinnedForward(ctx, box, local, remote, "")
+}
+
+// AddPinnedForward saves a forward under a stable key, so a later call can
+// find it again instead of remembering a random id.
+func (c *Client) AddPinnedForward(ctx context.Context, box string, local, remote int, pin string) (Forward, error) {
 	var f Forward
-	req := map[string]any{"box": box, "local": local, "remote": remote}
+	req := map[string]any{"box": box, "local": local, "remote": remote, "pin": pin}
 	return f, c.call(ctx, http.MethodPost, "/v1/forwards", req, &f)
 }
 
