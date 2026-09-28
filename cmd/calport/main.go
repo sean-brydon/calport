@@ -57,6 +57,10 @@ Reaching services
   calport kit reclaim BOX [--dry-run] [--all] Free databases, ports and services of worktrees whose folder is gone
   calport route add '*.x.localhost' BOX PORT  Send every matching host to a box port, Host unchanged
   calport routes [--json]                  List routes (calport route rm PATTERN removes one)
+  calport orca connect BOX                 Let this computer's Orca app reach the box's runtime
+  calport orca serve|status|exec BOX       Run, check, or drive that runtime
+  calport units BOX [--json]               Managed units on a box
+  calport unit add BOX/NAME -- COMMAND...  Install and start a unit
 
 Sessions
   calport attach BOX/SESSION               Attach this terminal to an agent session (detach: Ctrl-b d)
@@ -206,6 +210,8 @@ func run(args []string) error {
 			return err
 		}
 		return integrations.Install(rest, exe, os.Stdout)
+	case "orca":
+		return orcaCommand(l, rest)
 	case "emit":
 		// An event for this laptop, unless it names a paired box first.
 		if len(rest) > 0 {

@@ -70,6 +70,7 @@ var Commands = map[string]int{
 	"services": 1, "info": 1, "stats": 1,
 	"ports": 1, "share": 1, "shares": 1, "unshare": 1,
 	"emit": 1, "events": 1,
+	"units": 1, "unit": 2,
 }
 
 // Run executes args, which start with the command words, against c.
@@ -309,6 +310,65 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 			}
 			w.Flush()
 		})
+	case "units":
+		fs, asJSON := flags(rest)
+		parse(fs, rest)
+		all, err := c.Units(ctx)
+		if err != nil {
+			return err
+		}
+		return show(out, *asJSON, all, func() {
+			if len(all) == 0 {
+				fmt.Fprintln(out, "No managed units.")
+				return
+			}
+			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "NAME\tSTATE\tLOG")
+			for _, u := range all {
+				fmt.Fprintf(w, "%s\t%s\t%s\n", u.Name, u.State, u.LogPath)
+			}
+			w.Flush()
+		})
+	case "unit add":
+		if len(rest) < 2 {
+			return usageErr("unit add NAME -- COMMAND...")
+		}
+		name, command := rest[0], rest[1:]
+		if command[0] == "--" {
+			command = command[1:]
+		}
+		if len(command) == 0 {
+			return usageErr("unit add NAME -- COMMAND...")
+		}
+		u, err := c.AddUnit(ctx, box.UnitRequest{Name: name, Program: command[0], Args: command[1:]})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Unit %s is %s; its output goes to %s\n", u.Name, u.State, u.LogPath)
+		return nil
+	case "unit get":
+		fs, asJSON := flags(rest)
+		pos, err := parse(fs, rest)
+		if err != nil || len(pos) != 1 {
+			return usageErr("unit get NAME")
+		}
+		u, err := c.Unit(ctx, pos[0])
+		if err != nil {
+			return err
+		}
+		return show(out, *asJSON, u, func() {
+			fmt.Fprintf(out, "%s is %s; its output goes to %s\n", u.Name, u.State, u.LogPath)
+		})
+	case "unit rm":
+		if len(rest) != 1 {
+			return usageErr("unit rm NAME")
+		}
+		u, err := c.RemoveUnit(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Stopped and removed unit %s; its log is still at %s\n", u.Name, u.LogPath)
+		return nil
 	case "unshare":
 		if len(rest) != 1 {
 			return usageErr("unshare ID")
