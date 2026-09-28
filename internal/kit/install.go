@@ -459,3 +459,34 @@ func writeAtomic(path string, b []byte, mode os.FileMode) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// Refresh rewrites the kit's scripts from this build when a kit calport
+// installed is out of date, so upgrading calportd upgrades the kit too. A kit
+// installed another way (no node recorded) is left for `kit install`.
+func (in *Installer) Refresh() (bool, error) {
+	s := in.Status()
+	if !s.Installed || s.Config.Node == "" {
+		return false, nil
+	}
+	changed := false
+	err := fs.WalkDir(files, "cal", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		want, err := files.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(s.Dir, filepath.Base(path))
+		if have, err := os.ReadFile(dest); err == nil && string(have) == string(want) {
+			return nil
+		}
+		mode := os.FileMode(0o644)
+		if !strings.HasSuffix(path, ".cjs") {
+			mode = 0o755
+		}
+		changed = true
+		return writeAtomic(dest, want, mode)
+	})
+	return changed, err
+}

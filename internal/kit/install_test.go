@@ -223,3 +223,27 @@ func TestOnlyLastingPathsAreRecorded(t *testing.T) {
 		}
 	}
 }
+
+func TestRefreshUpdatesOnlyAKitCalportInstalled(t *testing.T) {
+	in, root, _ := fakeBox(t)
+	if _, err := in.Install(context.Background(), root, "devl"); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(in.Dir(), "cal-worktree")
+	must(t, os.WriteFile(script, []byte("stale"), 0o755))
+	if changed, err := in.Refresh(); err != nil || !changed {
+		t.Fatalf("Refresh = %v, %v; want the stale script replaced", changed, err)
+	}
+	if b, _ := os.ReadFile(script); string(b) == "stale" {
+		t.Fatal("the script was not refreshed")
+	}
+	if changed, _ := in.Refresh(); changed {
+		t.Fatal("an up-to-date kit was rewritten")
+	}
+	// A kit written by something else records no node: leave it alone.
+	must(t, os.WriteFile(filepath.Join(in.Dir(), "config.json"), []byte(`{"host":"personal","root":"`+root+`"}`), 0o600))
+	must(t, os.WriteFile(script, []byte("theirs"), 0o755))
+	if changed, _ := in.Refresh(); changed {
+		t.Fatal("refreshed a kit calport did not install")
+	}
+}

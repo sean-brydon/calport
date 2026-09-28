@@ -219,6 +219,14 @@ func serve(b boxHome, args []string) error {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
+	kitInstall := kitInstaller(exe)
+	if kitInstall != nil {
+		if changed, err := kitInstall.Refresh(); err != nil {
+			log.Printf("refreshing the Cal.com kit: %v", err)
+		} else if changed {
+			log.Printf("refreshed the Cal.com kit's scripts from this build")
+		}
+	}
 	bx := &box.Box{
 		Name:         hostname,
 		Locations:    locations,
@@ -228,7 +236,7 @@ func serve(b boxHome, args []string) error {
 		Watcher:      watcher,
 		DaemonChecks: func() []doctor.Check { return daemonChecks(b, ln.Addr().String(), *listen) },
 		LogDir:       filepath.Join(b.dir, "logs"),
-		Kit:          kitInstaller(exe),
+		Kit:          kitInstall,
 		AgentStates:  agentStates,
 		Update: &box.SelfUpdate{
 			Executable:    exe,
