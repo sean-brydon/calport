@@ -138,7 +138,14 @@ func port80Checks(area string) []doctor.Check {
 		case "":
 			checks = append(checks, doctor.Check{Area: area, Name: name, Status: doctor.Warn, Detail: "nothing answers, so browsers fall back to the other address", Fix: "calport setup port80"})
 		default:
-			checks = append(checks, doctor.Check{Area: area, Name: name, Status: doctor.Warn, Detail: "answered by another program: " + who, Fix: "Stop that program, then: calport setup port80"})
+			// Naming the launchd job turns "stop that program" into commands
+			// that can be run: the scope it sits in decides whether freeing it
+			// needs root, and that is not visible from the response.
+			detail, fix := "answered by another program: "+who, "Stop that program, then: calport setup port80"
+			if h, ok := portHolder(80); ok {
+				detail, fix = holderDetail(h), holderFix(h)
+			}
+			checks = append(checks, doctor.Check{Area: area, Name: name, Status: doctor.Warn, Detail: detail, Fix: fix})
 		}
 	}
 	return checks
@@ -156,9 +163,6 @@ func whoAnswers(addr string) string {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if strings.Contains(string(body), "<h1 style=\"font-size:20px\">calport</h1>") {
 		return "calport"
-	}
-	if strings.Contains(string(body), "Cal.com worktree") {
-		return "tailmux's worktree proxy (io.tailmux.cal-worktrees)"
 	}
 	if s := resp.Header.Get("Server"); s != "" {
 		return s
