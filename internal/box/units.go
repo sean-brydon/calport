@@ -45,7 +45,11 @@ type serviceOps struct {
 	install   func(service.Spec) (string, error)
 	start     func(service.Spec) error
 	uninstall func(service.Spec) (string, error)
-	installed func(service.Spec) bool
+	// installed answers "is the unit on disk exactly this spec?";
+	// installedByName answers "is there a unit with this name at all?". See
+	// the doc comments on service.Installed and service.InstalledByName.
+	installed       func(service.Spec) bool
+	installedByName func(string) bool
 }
 
 // Units installs and reports calportd's managed units. Dir holds one log per
@@ -61,10 +65,11 @@ func (u *Units) ops() serviceOps {
 		return *u.svc
 	}
 	return serviceOps{
-		install:   service.Install,
-		start:     service.Start,
-		uninstall: service.Uninstall,
-		installed: service.Installed,
+		install:         service.Install,
+		start:           service.Start,
+		uninstall:       service.Uninstall,
+		installed:       service.Installed,
+		installedByName: service.InstalledByName,
 	}
 }
 
@@ -133,7 +138,10 @@ func (u *Units) Get(name string) (Unit, error) {
 	// State is what the service manager can tell us without a status call,
 	// which internal/service does not expose. Whether the runtime inside a
 	// unit is usable is answered by its ready record, not by this field.
-	if !u.ops().installed(service.Spec{Name: name}) {
+	// A name is all this call has: the spec the unit was written from is not
+	// reconstructible here, so this asks whether a unit of that name exists,
+	// not whether it matches a spec.
+	if !u.ops().installedByName(name) {
 		return Unit{}, ErrUnknownUnit
 	}
 	return Unit{Name: name, LogPath: u.logPath(name), State: "installed"}, nil

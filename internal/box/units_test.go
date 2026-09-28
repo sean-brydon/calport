@@ -5,21 +5,28 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/sean-brydon/calport/internal/service"
 )
 
-// fakeService records what would have been installed. Tests never call the
-// real service manager: service.Install writes a launchd plist or systemd unit
-// and loads it, which would leave a running unit on the machine under test.
+// fakeService models the unit files on disk rather than a set of installed
+// names. Tests never call the real service manager: service.Install writes a
+// launchd plist or systemd unit and loads it, which would leave a running unit
+// on the machine under test.
+//
+// The whole spec is recorded because that is the contract the real functions
+// keep: service.Installed byte-compares the rendered spec against the file, so
+// a fake keyed on name alone would report a unit installed for any spec at all
+// and hide the difference between the two questions Units asks.
 func fakeService() (*serviceOps, *[]string) {
-	installed := map[string]bool{}
+	files := map[string]service.Spec{}
 	calls := &[]string{}
 	return &serviceOps{
 		install: func(s service.Spec) (string, error) {
-			installed[s.Name] = true
+			files[s.Name] = s
 			*calls = append(*calls, "install "+s.Name+" "+s.Program)
 			return "/fake/" + s.Name, nil
 		},
@@ -28,11 +35,18 @@ func fakeService() (*serviceOps, *[]string) {
 			return nil
 		},
 		uninstall: func(s service.Spec) (string, error) {
-			delete(installed, s.Name)
+			delete(files, s.Name)
 			*calls = append(*calls, "uninstall "+s.Name)
 			return "/fake/" + s.Name, nil
 		},
-		installed: func(s service.Spec) bool { return installed[s.Name] },
+		installed: func(s service.Spec) bool {
+			have, ok := files[s.Name]
+			return ok && reflect.DeepEqual(have, s)
+		},
+		installedByName: func(name string) bool {
+			_, ok := files[name]
+			return ok
+		},
 	}, calls
 }
 
@@ -62,6 +76,35 @@ func TestInstallStartsAUnitAndReportsIt(t *testing.T) {
 	}
 	if len(*calls) != 2 || !strings.HasPrefix((*calls)[0], "install calport-probe") || (*calls)[1] != "start calport-probe" {
 		t.Fatalf("service calls = %v; want one install then one start", *calls)
+	}
+}
+
+// Get holds only a name, so it cannot render the spec the unit was written
+// from. Asking the service manager whether that exact spec is installed always
+// answers no, which made Install return "no unit with that name" for the unit
+// it had just installed and started.
+func TestGetAndRemoveFindTheUnitInstallReported(t *testing.T) {
+	svc, _ := fakeService()
+	u := &Units{Dir: t.TempDir(), svc: svc}
+	if _, err := u.Install(context.Background(), UnitRequest{Name: "calport-probe", Program: "/bin/sh", Args: []string{"-c", "true"}}); err != nil {
+		t.Fatalf("Install() = %v", err)
+	}
+	got, err := u.Get("calport-probe")
+	if err != nil {
+		t.Fatalf("Get() after Install = %v; want the unit that was just installed", err)
+	}
+	if got.Name != "calport-probe" || got.State != "installed" {
+		t.Fatalf("Get() = %+v; want the installed unit", got)
+	}
+	removed, err := u.Remove("calport-probe")
+	if err != nil {
+		t.Fatalf("Remove() = %v; want the unit removed", err)
+	}
+	if removed.State != "removed" {
+		t.Fatalf("Remove() = %+v; want state removed", removed)
+	}
+	if _, err := u.Get("calport-probe"); !errors.Is(err, ErrUnknownUnit) {
+		t.Fatalf("Get() after Remove = %v; want ErrUnknownUnit", err)
 	}
 }
 
