@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AddBoxDialog } from "@/components/add-box-dialog";
 import { AppSidebar } from "@/components/app-sidebar";
 import { BoxView } from "@/components/box-view";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Onboarding } from "@/components/onboarding";
 import { SettingsView } from "@/components/settings-view";
 import { Button } from "@/components/ui/button";
@@ -191,11 +192,15 @@ function Shell() {
 }
 
 export default function App() {
+  // Outermost, so a throw in a provider is caught too: anything above the
+  // boundary that fails takes the window white with it.
   return (
-    <ToastProvider>
-      <AnchoredToastProvider>
-        <Shell />
-      </AnchoredToastProvider>
-    </ToastProvider>
+    <ErrorBoundary>
+      <ToastProvider>
+        <AnchoredToastProvider>
+          <Shell />
+        </AnchoredToastProvider>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
