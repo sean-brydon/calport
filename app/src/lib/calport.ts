@@ -321,7 +321,15 @@ export const calport = {
   doctor: (box?: string) => json<Check[]>(box ? ["doctor", box] : ["doctor"]),
   services: (box: string) => json<Service[]>(["services", box]),
   kit: (box: string) => json<KitStatus>(["kit", box]),
-  stats: (box: string) => json<BoxStats>(["stats", box]),
+  stats: async (box: string) => {
+    const s = await json<BoxStats>(["stats", box]);
+    // A box running calportd older than 0.4.2 sends null for these when it has
+    // no agent running, because Go marshals a nil slice as null. Absorb that
+    // here rather than at each use: the fields are lists everywhere else, and a
+    // component added later should not have to know which daemon it is talking
+    // to. A crash in the overview is what this cost before.
+    return { ...s, agents: s.agents ?? [], disks: s.disks ?? [] };
+  },
   reclaim: (box: string, opts: { dryRun?: boolean; all?: boolean }) =>
     json<ReclaimReport>(["kit", "reclaim", box, ...(opts.dryRun ? ["--dry-run"] : []), ...(opts.all ? ["--all"] : [])]),
   installKit: (box: string, location: string) => json<KitInstall>(["kit", "install", `${box}/${location}`]),

@@ -1,6 +1,7 @@
 package box
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -99,5 +100,30 @@ func TestStatsUseTheContainersLimits(t *testing.T) {
 	os.WriteFile(filepath.Join(cg, "cpu.max"), []byte("max 100000\n"), 0o644)
 	if s := collectStatsIn(proc, cg); s.Memory.Total != 16000000*1024 || s.CPUs == 1 {
 		t.Fatalf("an unlimited cgroup changed the totals: %+v, %d CPUs", s.Memory, s.CPUs)
+	}
+}
+
+// A box with no agent running must still send a list. Go marshals a nil slice
+// as null, and every client here reads these fields as lists: a null is what
+// crashed the desktop app's overview on a box that happened to have no agent
+// running at the time.
+func TestStatsSendEmptyListsRatherThanNull(t *testing.T) {
+	s := collectStats(t.TempDir()) // an empty proc: no agent processes at all
+	if len(s.Agents) != 0 {
+		t.Fatalf("agents = %+v; want none from an empty proc", s.Agents)
+	}
+
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"agents", "disks"} {
+		if _, ok := got[field].([]any); !ok {
+			t.Fatalf("%s marshalled as %v, not a list; a client reading it as one fails", field, got[field])
+		}
 	}
 }

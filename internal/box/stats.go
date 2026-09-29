@@ -183,8 +183,17 @@ func collectStatsIn(proc, cgroup string) Stats {
 	if cpus := cgroupCPUs(cgroup); cpus > 0 && cpus < s.CPUs {
 		s.CPUs = cpus
 	}
+	// Never nil: a nil slice marshals as null, and every client reads these as
+	// lists. A box with no agent running is an ordinary state, not a missing
+	// field, and it should not be the client's job to tell the two apart.
 	s.Disks = disks()
+	if s.Disks == nil {
+		s.Disks = []Disk{}
+	}
 	s.Agents = agentProcesses(proc)
+	if s.Agents == nil {
+		s.Agents = []Agent{}
+	}
 	return s
 }
 
