@@ -36,6 +36,19 @@ if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
 fi
 export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 
+# The updater key above proves an update came from us; it says nothing to
+# Gatekeeper. Without a Developer ID the linker's ad-hoc signature is all the
+# app carries, and everyone who downloads it has to bypass Gatekeeper from a
+# terminal. Pick the identity here so the build signs with it.
+if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+  found="$(security find-identity -v -p codesigning 2>/dev/null | grep -c "Developer ID Application" || true)"
+  [ "$found" = 1 ] ||
+    die "set APPLE_SIGNING_IDENTITY: found $found Developer ID Application identities, need exactly one to choose automatically"
+  APPLE_SIGNING_IDENTITY="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)"
+fi
+export APPLE_SIGNING_IDENTITY
+echo "Signing as ${APPLE_SIGNING_IDENTITY}…"
+
 echo "Setting version ${version}…"
 python3 - "$version" <<'PY'
 import json, re, sys
@@ -60,6 +73,16 @@ make release >/dev/null
 echo "Building and signing the app…"
 make app-build >/dev/null
 bundle="app/src-tauri/target/release/bundle"
+
+# An unsigned build installs and then refuses to open on anyone else's Mac, and
+# the only sign of it here is a line in codesign's output. Releases went out
+# ad-hoc signed for want of this check, so make it a condition of publishing.
+signed="$bundle/macos/Calport.app"
+codesign -dv "$signed" 2>&1 | grep -q "^TeamIdentifier=not set" &&
+  die "the app is ad-hoc signed, so Gatekeeper will refuse it; APPLE_SIGNING_IDENTITY did not reach the build"
+codesign --verify --strict "$signed" 2>/dev/null ||
+  die "the app's signature does not verify"
+
 tarball="$(ls "$bundle"/macos/*.app.tar.gz)"
 [ -f "$tarball.sig" ] || die "the updater bundle was not signed"
 cp "$tarball" dist/Calport-macos-arm64.app.tar.gz
