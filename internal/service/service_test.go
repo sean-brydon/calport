@@ -193,3 +193,41 @@ func TestLinuxUnitsWithoutALogPathRedirectNothing(t *testing.T) {
 		t.Fatalf("unit redirects output with no LogPath set:\n%s", unit)
 	}
 }
+
+// calportd exits only when something is wrong, so on-failure is right for it:
+// restarting forever would hide a bad configuration. A managed unit is the
+// opposite - it exists to stay up, and the programs it runs can shut down
+// cleanly on their own. An Orca runtime did exactly that, exited 0, and
+// systemd left it dead because the policy said the job had succeeded.
+func TestUnitsThatMustStayUpRestartOnACleanExitToo(t *testing.T) {
+	stub(t, "linux")
+	always, err := Render(Spec{Name: "orca-runtime", Program: "/usr/bin/orca", RestartAlways: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(always), "Restart=always") {
+		t.Fatalf("a stay-up unit must restart on a clean exit:\n%s", always)
+	}
+
+	onFailure, err := Render(Spec{Name: "calport-agent", Program: "/usr/bin/calport"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(onFailure), "Restart=on-failure") || strings.Contains(string(onFailure), "Restart=always") {
+		t.Fatalf("the daemon's own policy must not change:\n%s", onFailure)
+	}
+}
+
+func TestRunningAsksThePlatformWhetherTheServiceIsUp(t *testing.T) {
+	_, calls := stub(t, "linux")
+	Running(Spec{Name: "orca-runtime"})
+	if len(*calls) != 1 || (*calls)[0] != "systemctl --user is-active orca-runtime.service" {
+		t.Fatalf("calls = %v; want systemctl is-active", *calls)
+	}
+
+	_, macCalls := stub(t, "darwin")
+	Running(Spec{Name: "orca-runtime"})
+	if len(*macCalls) != 1 || !strings.HasPrefix((*macCalls)[0], "launchctl print gui/") {
+		t.Fatalf("calls = %v; want launchctl print", *macCalls)
+	}
+}

@@ -61,6 +61,8 @@ Reaching services
   calport orca serve|status|exec BOX       Run, check, or drive that runtime
   calport units BOX [--json]               Managed units on a box
   calport unit add BOX/NAME -- COMMAND...  Install and start a unit
+  calport unit log BOX/NAME                What a unit has written, for one that will not stay up
+  calport unit restart BOX/NAME            Start a unit again
 
 Sessions
   calport attach BOX/SESSION               Attach this terminal to an agent session (detach: Ctrl-b d)

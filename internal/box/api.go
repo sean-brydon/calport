@@ -88,6 +88,7 @@ func (b *Box) Mount(s *wire.Server) {
 	route("POST /v1/units", b.addUnit)
 	route("GET /v1/units/{name}", b.getUnit)
 	route("DELETE /v1/units/{name}", b.removeUnit)
+	route("POST /v1/units/{name}/restart", b.restartUnit)
 	route("GET /v1/units/{name}/log", b.unitLog)
 	route("GET /v1/stats", b.handleStats)
 	route("GET /v1/kit", b.kitStatus)
@@ -521,6 +522,20 @@ func (b *Box) removeUnit(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	b.publish(r, "unit.stopped", map[string]any{"name": unit.Name})
+	writeJSON(w, unit)
+	return nil
+}
+
+func (b *Box) restartUnit(w http.ResponseWriter, r *http.Request) error {
+	u, err := b.units()
+	if err != nil {
+		return err
+	}
+	unit, err := u.Restart(r.PathValue("name"))
+	if err != nil {
+		return err
+	}
+	b.publish(r, "unit.restarted", map[string]any{"name": unit.Name})
 	writeJSON(w, unit)
 	return nil
 }

@@ -28,6 +28,12 @@ type Spec struct {
 	// stops or restarts, the way sshd keeps SSH sessions: calportd's agent
 	// sessions must survive the daemon being upgraded.
 	KeepChildren bool
+	// RestartAlways brings the service back even when it exits cleanly, for
+	// something whose job is to stay up. calportd leaves this off: it exits
+	// only when something is wrong, and restarting it forever would bury the
+	// reason. A program run as a managed unit can shut itself down on purpose
+	// and still need to come back.
+	RestartAlways bool
 }
 
 // These are replaced in tests.
@@ -106,7 +112,11 @@ func Render(s Spec) ([]byte, error) {
 		if s.LogPath != "" {
 			fmt.Fprintf(&b, "StandardOutput=append:%s\nStandardError=append:%s\n", s.LogPath, s.LogPath)
 		}
-		b.WriteString("Restart=on-failure\nRestartSec=5\n")
+		policy := "on-failure"
+		if s.RestartAlways {
+			policy = "always"
+		}
+		fmt.Fprintf(&b, "Restart=%s\nRestartSec=5\n", policy)
 		if s.KeepChildren {
 			b.WriteString("KillMode=process\n")
 		}
@@ -212,6 +222,19 @@ func Uninstall(s Spec) (string, error) {
 }
 
 // Start asks the supervisor to start the service if it is not running.
+// Running reports whether the service is up right now, which is not the same
+// question as Installed: a unit can be written and enabled and still be dead,
+// and telling those apart is the difference between "it is configured" and
+// "it is working".
+func Running(s Spec) bool {
+	if goos == "darwin" {
+		out, err := command("launchctl", "print", launchdTarget(s))
+		return err == nil && strings.Contains(string(out), "state = running")
+	}
+	out, err := command("systemctl", "--user", "is-active", s.Name+".service")
+	return err == nil && strings.TrimSpace(string(out)) == "active"
+}
+
 func Start(s Spec) error {
 	var out []byte
 	var err error

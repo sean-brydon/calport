@@ -359,6 +359,35 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		return show(out, *asJSON, u, func() {
 			fmt.Fprintf(out, "%s is %s; its output goes to %s\n", u.Name, u.State, u.LogPath)
 		})
+	case "unit log":
+		if len(rest) != 1 {
+			return usageErr("unit log NAME")
+		}
+		// The whole reason a unit writes to a file calportd owns is so this
+		// can read it: a unit that will not stay up explains itself here.
+		log, err := c.UnitLog(ctx, rest[0], 1<<20)
+		if err != nil {
+			return err
+		}
+		if len(log) == 0 {
+			fmt.Fprintf(out, "Unit %s has written nothing yet.\n", rest[0])
+			return nil
+		}
+		out.Write(log)
+		if log[len(log)-1] != '\n' {
+			fmt.Fprintln(out)
+		}
+		return nil
+	case "unit restart":
+		if len(rest) != 1 {
+			return usageErr("unit restart NAME")
+		}
+		u, err := c.RestartUnit(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Unit %s is %s; its output goes to %s\n", u.Name, u.State, u.LogPath)
+		return nil
 	case "unit rm":
 		if len(rest) != 1 {
 			return usageErr("unit rm NAME")

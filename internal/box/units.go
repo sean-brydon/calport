@@ -49,6 +49,9 @@ type serviceOps struct {
 	// the doc comments on service.Installed and service.InstalledByName.
 	installed       func(service.Spec) bool
 	installedByName func(string) bool
+	// running answers "is it up right now?", which installed cannot: a unit
+	// can be written, enabled and dead.
+	running func(service.Spec) bool
 }
 
 // Units installs and reports calportd's managed units. Dir holds one log per
@@ -69,6 +72,7 @@ func (u *Units) ops() serviceOps {
 		uninstall:       service.Uninstall,
 		installed:       service.Installed,
 		installedByName: service.InstalledByName,
+		running:         service.Running,
 	}
 }
 
@@ -97,6 +101,9 @@ func (u *Units) spec(req UnitRequest) (service.Spec, error) {
 		Args:        req.Args,
 		Env:         req.Env,
 		LogPath:     u.logPath(req.Name),
+		// A managed unit exists to stay up, and the programs it runs can shut
+		// themselves down cleanly. on-failure would read that as success.
+		RestartAlways: true,
 	}, nil
 }
 
@@ -143,16 +150,21 @@ func (u *Units) Get(name string) (Unit, error) {
 	if !unitName.MatchString(name) {
 		return Unit{}, badRequest("unit name %q must be lowercase letters, digits and dashes", name)
 	}
-	// State is what the service manager can tell us without a status call,
-	// which internal/service does not expose. Whether the runtime inside a
-	// unit is usable is answered by its ready record, not by this field.
 	// A name is all this call has: the spec the unit was written from is not
 	// reconstructible here, so this asks whether a unit of that name exists,
 	// not whether it matches a spec.
-	if !u.ops().installedByName(name) {
+	ops := u.ops()
+	if !ops.installedByName(name) {
 		return Unit{}, ErrUnknownUnit
 	}
-	return Unit{Name: name, LogPath: u.logPath(name), State: "installed"}, nil
+	// Installed and running are different questions, and only the second
+	// answers "is it working". Reporting installed for a dead unit is how a
+	// stopped Orca runtime looked healthy while nothing was listening.
+	state := "stopped"
+	if ops.running(service.Spec{Name: name}) {
+		state = "running"
+	}
+	return Unit{Name: name, LogPath: u.logPath(name), State: state}, nil
 }
 
 func (u *Units) List() ([]Unit, error) {
@@ -202,6 +214,19 @@ func (u *Units) Remove(name string) (Unit, error) {
 	}
 	unit.State = "removed"
 	return unit, nil
+}
+
+// Restart stops and starts the unit without rewriting it, for a unit whose
+// program died in a way its restart policy did not cover, or which needs to
+// pick up something outside its own definition.
+func (u *Units) Restart(name string) (Unit, error) {
+	if _, err := u.Get(name); err != nil {
+		return Unit{}, err
+	}
+	if err := u.ops().start(service.Spec{Name: name}); err != nil {
+		return Unit{}, fmt.Errorf("restarting unit %s: %w", name, err)
+	}
+	return u.Get(name)
 }
 
 // Tail returns at most limit bytes from the end of the unit's log. Callers

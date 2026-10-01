@@ -165,6 +165,10 @@ func (c *Client) RemoveUnit(ctx context.Context, name string) (out Unit, err err
 
 // UnitLog returns the end of a unit's log. A unit's output can contain
 // credentials, so callers parse it and must not log what they read.
+func (c *Client) RestartUnit(ctx context.Context, name string) (out Unit, err error) {
+	return out, c.call(ctx, http.MethodPost, "/v1/units/"+url.PathEscape(name)+"/restart", nil, &out)
+}
+
 func (c *Client) UnitLog(ctx context.Context, name string, limit int64) ([]byte, error) {
 	var out struct {
 		Log []byte `json:"log"`

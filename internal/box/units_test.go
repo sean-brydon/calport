@@ -47,6 +47,10 @@ func fakeService() (*serviceOps, *[]string) {
 			_, ok := files[name]
 			return ok
 		},
+		running: func(s service.Spec) bool {
+			_, ok := files[s.Name]
+			return ok
+		},
 	}, calls
 }
 
@@ -67,8 +71,8 @@ func TestInstallStartsAUnitAndReportsIt(t *testing.T) {
 	if want := filepath.Join(u.Dir, "calport-probe.log"); got.LogPath != want {
 		t.Fatalf("Install().LogPath = %q; want %q", got.LogPath, want)
 	}
-	if got.State != "installed" {
-		t.Fatalf("Install().State = %q; want installed", got.State)
+	if got.State != "running" {
+		t.Fatalf("Install().State = %q; Install starts the unit, so it reports running", got.State)
 	}
 	all, err := u.List()
 	if err != nil || len(all) != 1 || all[0].Name != "calport-probe" {
@@ -93,8 +97,8 @@ func TestGetAndRemoveFindTheUnitInstallReported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() after Install = %v; want the unit that was just installed", err)
 	}
-	if got.Name != "calport-probe" || got.State != "installed" {
-		t.Fatalf("Get() = %+v; want the installed unit", got)
+	if got.Name != "calport-probe" || got.State != "running" {
+		t.Fatalf("Get() = %+v; want the unit that was just installed and started", got)
 	}
 	removed, err := u.Remove("calport-probe")
 	if err != nil {
@@ -227,5 +231,36 @@ func TestTailReturnsWhateverIsThereWhenTheLogIsSmallerThanTheLimit(t *testing.T)
 	}
 	if string(out) != body {
 		t.Fatalf("Tail() = %q; want the whole file %q, not an error or a short read", out, body)
+	}
+}
+
+func TestGetTellsRunningFromStopped(t *testing.T) {
+	svc, _ := fakeService()
+	up := true
+	svc.running = func(service.Spec) bool { return up }
+	u := &Units{Dir: t.TempDir(), svc: svc}
+	if _, err := u.Install(context.Background(), UnitRequest{Name: "calport-probe", Program: "/bin/sh"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := u.Get("calport-probe")
+	if err != nil || got.State != "running" {
+		t.Fatalf("Get() = %+v, %v; want running", got, err)
+	}
+	up = false
+	if got, _ = u.Get("calport-probe"); got.State != "stopped" {
+		t.Fatalf("Get().State = %q; a dead unit must not read as installed", got.State)
+	}
+}
+
+func TestManagedUnitsComeBackFromACleanExit(t *testing.T) {
+	svc, _ := fakeService()
+	u := &Units{Dir: t.TempDir(), svc: svc}
+	spec, err := u.spec(UnitRequest{Name: "calport-probe", Program: "/bin/sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !spec.RestartAlways {
+		t.Fatal("a managed unit must restart on a clean exit; an Orca runtime exited 0 and stayed dead")
 	}
 }
