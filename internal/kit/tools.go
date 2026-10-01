@@ -342,7 +342,7 @@ func (in *Installer) setUpHerdr(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, herdr, "plugin", "link", "--enabled", dir).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, herdr, "plugin", "link", dir, "--enabled").CombinedOutput(); err != nil {
 		return fmt.Errorf("herdr plugin link: %s", strings.TrimSpace(string(out)))
 	}
 	return nil

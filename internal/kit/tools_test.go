@@ -169,12 +169,13 @@ func TestHerdrPluginIsOptInAndLinkedOnce(t *testing.T) {
 	ctx := context.Background()
 	bin := filepath.Join(in.Home, ".local", "bin")
 	must(t, os.MkdirAll(bin, 0o755))
-	// A fake herdr that remembers what was linked and counts link calls.
+	// A fake herdr that remembers what was linked and counts link calls. Like
+	// herdr 0.8.2, it wants the path before any flag: `link --enabled PATH` fails.
 	must(t, os.WriteFile(filepath.Join(bin, "herdr"), []byte(`#!/bin/sh
 state="$(dirname "$0")/linked"
 case "$2" in
 list) if [ -f "$state" ]; then echo '{"result":{"plugins":[{"id":"`+herdrPluginID+`"}]}}'; else echo '{"result":{"plugins":[]}}'; fi ;;
-link) echo "$4" >> "$state" ;;
+link) case "$3" in -*) echo "unknown option: $4" >&2; exit 2 ;; esac; echo "$3" >> "$state" ;;
 esac
 `), 0o755))
 
