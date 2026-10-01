@@ -149,17 +149,20 @@ function Shell() {
         {selected === SETTINGS ? (
           <SettingsView status={status.data} networks={networks.data ?? []} appUpdate={appUpdate} onNetworksChanged={networks.reload} onChanged={changed} />
         ) : box ? (
-          <BoxView
-            key={box.name}
-            box={box}
-            network={box.network}
-            urlPort={status.data.proxy.url_port || status.data.proxy.port}
-            forwards={status.data.forwards}
-            routes={status.data.routes ?? []}
-            version={version}
-            lifecycle={lifecycle}
-            onChanged={changed}
-          />
+          // Its own boundary, so a box that throws leaves the sidebar, Settings and the update
+          // toast standing: under only the outer one, a crash on launch also hid the fixed release.
+          <ErrorBoundary key={box.name}>
+            <BoxView
+              box={box}
+              network={box.network}
+              urlPort={status.data.proxy.url_port || status.data.proxy.port}
+              forwards={status.data.forwards}
+              routes={status.data.routes ?? []}
+              version={version}
+              lifecycle={lifecycle}
+              onChanged={changed}
+            />
+          </ErrorBoundary>
         ) : (
           <main className="flex min-h-svh items-center justify-center p-6">
             <Empty>
