@@ -96,6 +96,8 @@ func (b *Box) Mount(s *wire.Server) {
 	route("POST /v1/kit", b.installKit)
 	route("GET /v1/kit/tools", b.kitTools)
 	route("POST /v1/kit/tools", b.setUpKitTools)
+	route("GET /v1/herdr", b.handleHerdr)
+	route("POST /v1/herdr/update", b.handleHerdrUpdate)
 	route("GET /v1/info", b.handleInfo)
 	route("GET /v1/doctor", b.handleDoctor)
 	route("POST /v1/upgrade", b.handleUpgrade)

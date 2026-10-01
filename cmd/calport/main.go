@@ -59,6 +59,7 @@ Reaching services
   calport routes [--json]                  List routes (calport route rm PATTERN removes one)
   calport orca connect BOX                 Let this computer's Orca app reach the box's runtime
   calport orca serve|status|exec BOX       Run, check, or drive that runtime
+  calport herdr [status|setup|update|open] This computer's Herdr with every box in it; see calport herdr help
   calport units BOX [--json]               Managed units on a box
   calport unit add BOX/NAME -- COMMAND...  Install and start a unit
   calport unit log BOX/NAME                What a unit has written, for one that will not stay up
@@ -214,6 +215,8 @@ func run(args []string) error {
 		return integrations.Install(rest, exe, os.Stdout)
 	case "orca":
 		return orcaCommand(l, rest)
+	case "herdr":
+		return herdrCommand(l, rest)
 	case "emit":
 		// An event for this laptop, unless it names a paired box first.
 		if len(rest) > 0 {

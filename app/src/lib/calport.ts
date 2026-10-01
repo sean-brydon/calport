@@ -155,6 +155,30 @@ export interface BoxInfo {
   tools: string[];
 }
 
+// HerdrState is what stands between a box and this computer's Herdr; see
+// `calport herdr help`.
+export type HerdrState = "ready" | "add" | "ssh" | "update" | "packaged" | "missing" | "upgrade" | "offline" | "error";
+
+export interface HerdrBox {
+  box: string;
+  state: HerdrState;
+  detail?: string;
+  host: string;
+  version?: string;
+}
+
+export interface HerdrReport {
+  installed: boolean;
+  version?: string;
+  supported: boolean;
+  boxes: HerdrBox[];
+}
+
+export interface HerdrUpdate {
+  from: string;
+  stopped: string[];
+}
+
 export interface Route {
   pattern: string;
   box: string;
@@ -339,6 +363,11 @@ export const calport = {
     json<KitTools>(["kit", "tools", `${box}/${location}`, "--setup", ...(tools.length ? ["--tool", tools.join(",")] : [])]),
   info: async (box: string) => JSON.parse(await run(["info", box])) as BoxInfo,
   importOrca: (box: string) => run(["location", "import", box, "orca"]),
+  herdr: () => json<HerdrReport>(["herdr", "status"]),
+  // herdrSetup with no boxes adds every box that is ready to add.
+  herdrSetup: (boxes: string[] = []) => json<HerdrReport>(["herdr", "setup", ...boxes]),
+  herdrUpdate: (box: string) => json<HerdrUpdate>(["herdr", "update", box]),
+  openHerdr: () => run(["herdr", "open"]),
   openWorktree: (box: string, location: string, worktree: string, tool: "orca" | "herdr", agent?: string) =>
     run(["worktree", "open", `${box}/${location}/${worktree}`, "--tool", tool, ...(agent ? ["--agent", agent] : [])]),
   setScripts: (box: string, location: string, setup: string, archive: string) =>

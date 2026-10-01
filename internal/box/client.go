@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/sean-brydon/calport/internal/doctor"
 	"github.com/sean-brydon/calport/internal/events"
@@ -205,6 +206,27 @@ func (c *Client) Doctor(ctx context.Context) (out []doctor.Check, err error) {
 
 func (c *Client) Info(ctx context.Context) (out Info, err error) {
 	return out, c.call(ctx, http.MethodGet, "/v1/info", nil, &out)
+}
+
+// ErrHerdrUnsupported means the box runs a calportd from before it could
+// report Herdr; `calport upgrade BOX` fixes it.
+var ErrHerdrUnsupported = errors.New("this box's calportd predates Herdr support")
+
+func (c *Client) Herdr(ctx context.Context) (out HerdrStatus, err error) {
+	err = c.call(ctx, http.MethodGet, "/v1/herdr", nil, &out)
+	// An older daemon has no such route, and its mux answers in plain text.
+	if err != nil && strings.HasPrefix(err.Error(), "box replied 404") {
+		err = ErrHerdrUnsupported
+	}
+	return out, err
+}
+
+func (c *Client) UpdateHerdr(ctx context.Context) (out HerdrUpdate, err error) {
+	err = c.call(ctx, http.MethodPost, "/v1/herdr/update", nil, &out)
+	if err != nil && strings.HasPrefix(err.Error(), "box replied 404") {
+		err = ErrHerdrUnsupported
+	}
+	return out, err
 }
 
 // Upgrade uploads a daemon build; the box verifies it, swaps it in, and

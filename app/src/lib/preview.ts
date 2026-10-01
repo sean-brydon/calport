@@ -150,6 +150,18 @@ function key(args: string[]): string {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function herdrFixture(setUp: boolean) {
+  return {
+    installed: true,
+    version: "0.9.3",
+    supported: true,
+    boxes: [
+      { box: "devl", state: setUp ? "ready" : "add", host: "calport-devl", version: "0.9.3" },
+      { box: "dev-alex", state: "offline", detail: "dev-alex is offline.", host: "calport-dev-alex" },
+    ],
+  };
+}
+
 export async function previewRun(args: string[]): Promise<string> {
   await delay(120);
   if (args[0] === "url") return `http://${args[2]}.${args[1]}.localhost:1355/\n`;
@@ -157,6 +169,8 @@ export async function previewRun(args: string[]): Promise<string> {
   if (args[0] === "kit" && args[1] === "tools") return JSON.stringify(args.includes("--setup") ? setUpKitToolsFixture(args) : kitToolsFixture());
   if (args[0] === "kit" && args[1] === "reclaim")
     return JSON.stringify({ dry_run: args.includes("--dry-run"), reclaimed: [{ key: "a1", host: "old-a1b2c3.devl.cal.localhost", path: "/home/alex/orca/workspaces/cal/old", port: 3104, bytes: 1_300_000_000 }], templates: [{ name: "caltpl_x", bytes: 900_000_000 }], waiting: [], bytes: 2_200_000_000 });
+  if (args[0] === "herdr" && (args[1] === "status" || args[1] === "setup")) return JSON.stringify(herdrFixture(args[1] === "setup"));
+  if (args[0] === "herdr" && args[1] === "update") return JSON.stringify({ from: "0.8.2", stopped: ["agents"] });
   if (args[0] === "kit" && args[1] === "install") return JSON.stringify({ kit: { ...kitFixture(), installed: true, pattern: "*.devl.cal.localhost", notes: [] }, routed: true });
   const k = key(args);
   if (k in fixtures) return JSON.stringify(fixtures[k]);

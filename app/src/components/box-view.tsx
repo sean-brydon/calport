@@ -1,4 +1,4 @@
-import { EllipsisIcon, RefreshCwIcon, StethoscopeIcon, UnlinkIcon } from "lucide-react";
+import { EllipsisIcon, RefreshCwIcon, SquareTerminalIcon, StethoscopeIcon, UnlinkIcon } from "lucide-react";
 import { useState } from "react";
 
 import { CheckList } from "@/components/check-list";
@@ -82,6 +82,16 @@ export function BoxView({ box, network, urlPort, forwards, routes, version, life
             <MenuItem onClick={() => setChecking(true)}>
               <StethoscopeIcon />
               Run checks
+            </MenuItem>
+            <MenuItem
+              onClick={() =>
+                calport.openHerdr().catch((err) =>
+                  toastManager.add({ title: "Could not open Herdr", description: err instanceof Error ? err.message : String(err), type: "error" }),
+                )
+              }
+            >
+              <SquareTerminalIcon />
+              Open in Herdr
             </MenuItem>
             <MenuSeparator />
             <MenuItem variant="destructive" onClick={() => setForgetting(true)}>

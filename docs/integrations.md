@@ -70,6 +70,41 @@ calport worktree new devl/cal/fix-login --provider herdr --herdr-session agents
 - **Herdr**: `herdr worktree create`, which also opens a workspace with a pane
   in the new worktree.
 
+### Every box in this computer's Herdr
+
+Herdr 0.9 keeps local work and saved SSH machines in one window, with one
+agent list across them. `calport herdr setup` saves every paired box there:
+
+```sh
+calport herdr                 # each box's state, and what is in the way
+calport herdr setup [BOX...]  # add boxes; the default is every one that is ready
+calport herdr update BOX      # update Herdr on a box, over calport rather than SSH
+calport herdr open            # open Herdr in a terminal
+```
+
+Herdr reaches machines over SSH, so setup writes one SSH host per box,
+`calport-BOX`, in `~/.ssh/calport/BOX.conf`, and puts `Include
+calport/*.conf` at the top of `~/.ssh/config` (backed up once to
+`config.calport-backup`). Each host travels over the box's calport network
+through `calport network proxy`, so a box on a tailnet this computer is not on
+works too. Then it runs `herdr machine add calport-BOX --remote-session agents
+--label BOX`, which starts that session on the box if it is not running.
+
+Logging in stays yours: calport writes how to reach a box, never which key to
+use. A box that wants a particular key shows as `ssh` until you add it:
+
+```text
+Host calport-devl
+  IdentityFile ~/.ssh/devl.pub
+  IdentitiesOnly yes
+```
+
+Both ends need Herdr 0.9 or later. `calport herdr update BOX` stops the box's
+Herdr sessions first, since Herdr will not replace itself under a running
+server, and refuses while any of them hosts an agent. A Herdr a package
+manager installed (in `/usr/bin`, say) is left to that package manager.
+Settings → Herdr in the app shows the same states, with the action for each.
+
 ### The Orca runtime on a box
 
 `calport orca connect BOX` lets this computer's own Orca app reach an Orca

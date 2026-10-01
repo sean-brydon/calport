@@ -167,7 +167,11 @@ func openTerminal(args []string) error {
 	if err != nil {
 		return err
 	}
-	command := shellQuote(exe) + " attach " + shellQuote(args[0])
+	return openTerminalRunning(shellQuote(exe) + " attach " + shellQuote(args[0]))
+}
+
+// openTerminalRunning opens the system terminal running command.
+func openTerminalRunning(command string) error {
 	if runtime.GOOS != "darwin" {
 		return exec.Command("x-terminal-emulator", "-e", "sh", "-c", command).Start()
 	}

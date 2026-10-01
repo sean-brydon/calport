@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { CheckList } from "@/components/check-list";
 import { JoinNetwork } from "@/components/connect-box";
+import { HerdrCard } from "@/components/herdr-card";
 import { ToolIntegrations } from "@/components/tool-integrations";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ export function SettingsView({ status, networks, appUpdate, onNetworksChanged, o
         <ShortURLs urlPort={status.proxy.url_port || status.proxy.port} onChanged={onChanged} />
         <Routes status={status} onChanged={onChanged} />
         <Networks networks={networks} onNetworksChanged={onNetworksChanged} />
+        <HerdrCard />
         <Card>
           <CardHeader>
             <CardTitle>Agents on this computer</CardTitle>
