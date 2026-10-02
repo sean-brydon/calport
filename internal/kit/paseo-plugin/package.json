@@ -4,13 +4,22 @@
   "version": "1.0.0",
   "files": [
     "paseo-plugin.json",
-    "index.server.ts"
+    "index.server.ts",
+    "index.client.tsx",
+    "client",
+    "server",
+    "shared"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.10.3",
-    "typescript": "^5.9.3"
+    "@tanstack/react-query": "^5.90.2",
+    "@types/react": "~19.1.0",
+    "react": "~19.1.0",
+    "react-native": "^0.82.1",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
   }
 }

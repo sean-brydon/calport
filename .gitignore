@@ -4,3 +4,4 @@
 /app/src-tauri/target/
 /app/node_modules/
 /app/dist/
+/internal/kit/paseo-plugin/node_modules/
