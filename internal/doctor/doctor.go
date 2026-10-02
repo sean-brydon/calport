@@ -38,8 +38,9 @@ type Check struct {
 // A variable so tests can redirect it.
 var extraToolDirs = []string{"/opt/homebrew/bin", "/usr/local/bin"}
 
-// Tool finds an executable on PATH, in ~/.local/bin, or in a Homebrew
-// prefix, where Orca, Herdr, cloudflared, and agent CLIs install themselves.
+// Tool finds an executable on PATH, in ~/.local/bin, in a Homebrew prefix, or
+// where a Node version manager keeps its global installs: that is where Orca,
+// Herdr, Paseo, cloudflared, and the agent CLIs put themselves.
 func Tool(name string) (string, bool) {
 	if p, err := exec.LookPath(name); err == nil {
 		return p, true
@@ -47,7 +48,13 @@ func Tool(name string) (string, bool) {
 	dirs := extraToolDirs
 	if home, err := os.UserHomeDir(); err == nil {
 		dirs = append([]string{filepath.Join(home, ".local", "bin")}, dirs...)
+		dirs = append(dirs, nodeToolDirs(home, dirs)...)
 	}
+	return findExecutable(name, dirs)
+}
+
+// findExecutable returns the first dir holding name as something runnable.
+func findExecutable(name string, dirs []string) (string, bool) {
 	for _, dir := range dirs {
 		p := filepath.Join(dir, name)
 		if info, err := os.Stat(p); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
@@ -55,6 +62,62 @@ func Tool(name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// nodeToolDirs are where Node keeps globally installed CLIs. An npm global
+// lands in a directory belonging to the selected Node version, which only a
+// shell that ran the version manager's init has on PATH - so calportd under
+// systemd, and a macOS app, both see nothing without looking here. known is
+// where Tool has already decided to look.
+//
+// Each manager is asked for the version it considers current, rather than
+// having its versions globbed: picking an arbitrary installed version would
+// run a CLI the user has not selected.
+func nodeToolDirs(home string, known []string) []string {
+	fnm := os.Getenv("FNM_DIR")
+	if fnm == "" {
+		fnm = filepath.Join(home, ".local", "share", "fnm")
+	}
+	dirs := []string{
+		filepath.Join(fnm, "aliases", "default", "bin"),
+		filepath.Join(home, ".local", "share", "mise", "shims"),
+		filepath.Join(home, ".volta", "bin"),
+		filepath.Join(home, ".asdf", "shims"),
+		filepath.Join(home, ".bun", "bin"),
+		filepath.Join(home, ".npm-global", "bin"),
+	}
+	// nvm names its default in a file, which may hold a full version
+	// ("v20.19.0") or a prefix it resolves at use time ("20", "lts/iron").
+	nvm := os.Getenv("NVM_DIR")
+	if nvm == "" {
+		nvm = filepath.Join(home, ".nvm")
+	}
+	if alias, err := os.ReadFile(filepath.Join(nvm, "alias", "default")); err == nil {
+		want := strings.TrimSpace(string(alias))
+		versions := filepath.Join(nvm, "versions", "node")
+		if entries, err := os.ReadDir(versions); err == nil {
+			for _, e := range entries {
+				if e.Name() == want || strings.HasPrefix(e.Name(), "v"+want+".") {
+					dirs = append(dirs, filepath.Join(versions, e.Name(), "bin"))
+				}
+			}
+		}
+	}
+	// Wherever node itself is, npm's global bin is its sibling. This catches a
+	// hand-rolled prefix that no manager-specific path would, as long as
+	// something put node somewhere we can see - commonly a symlink in
+	// ~/.local/bin, which is why the search covers known too.
+	node, err := exec.LookPath("node")
+	if err != nil {
+		node, _ = findExecutable("node", append(append([]string{}, known...), dirs...))
+	}
+	if node != "" {
+		if real, err := filepath.EvalSymlinks(node); err == nil {
+			node = real
+		}
+		dirs = append(dirs, filepath.Dir(node))
+	}
+	return dirs
 }
 
 // ToolCheck reports a tool's presence. required marks tools calport cannot

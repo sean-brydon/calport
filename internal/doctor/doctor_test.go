@@ -69,3 +69,113 @@ func TestToolReportsMissingToolAsAbsent(t *testing.T) {
 		t.Fatalf("Tool = %q, true; want absent", path)
 	}
 }
+
+func TestToolFindsAnNpmGlobalUnderAVersionManager(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	// Both take precedence by design, so a real manager on this machine would
+	// otherwise answer for the fake home.
+	t.Setenv("FNM_DIR", filepath.Join(home, ".local", "share", "fnm"))
+	t.Setenv("NVM_DIR", filepath.Join(home, ".nvm"))
+	oldDirs := extraToolDirs
+	extraToolDirs = []string{t.TempDir()}
+	t.Cleanup(func() { extraToolDirs = oldDirs })
+
+	// fnm's default alias, which is what the box actually uses.
+	fnmBin := filepath.Join(home, ".local", "share", "fnm", "aliases", "default", "bin")
+	if err := os.MkdirAll(fnmBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fnmBin, "paseo"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if path, ok := Tool("paseo"); !ok || path != filepath.Join(fnmBin, "paseo") {
+		t.Fatalf("Tool(paseo) = %q, %v; want the fnm default alias copy", path, ok)
+	}
+
+	// nvm names its default version in a file; only that version counts.
+	versions := filepath.Join(home, ".nvm", "versions", "node")
+	for _, v := range []string{"v18.20.0", "v20.19.0"} {
+		if err := os.MkdirAll(filepath.Join(versions, v, "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(versions, v, "bin", "herdr"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".nvm", "alias"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".nvm", "alias", "default"), []byte("20\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if path, ok := Tool("herdr"); !ok || path != filepath.Join(versions, "v20.19.0", "bin", "herdr") {
+		t.Fatalf("Tool(herdr) = %q, %v; want the version nvm defaults to", path, ok)
+	}
+}
+
+func TestToolIgnoresVersionsAVersionManagerHasNotSelected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	// Both take precedence by design, so a real manager on this machine would
+	// otherwise answer for the fake home.
+	t.Setenv("FNM_DIR", filepath.Join(home, ".local", "share", "fnm"))
+	t.Setenv("NVM_DIR", filepath.Join(home, ".nvm"))
+	oldDirs := extraToolDirs
+	extraToolDirs = []string{t.TempDir()}
+	t.Cleanup(func() { extraToolDirs = oldDirs })
+
+	// An installed version with no default alias naming it: not ours to run.
+	bin := filepath.Join(home, ".nvm", "versions", "node", "v18.20.0", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "paseo"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if path, ok := Tool("paseo"); ok {
+		t.Fatalf("Tool(paseo) = %q, true; want absent until nvm names a default", path)
+	}
+}
+
+// A hand-rolled Node prefix matches no version manager layout, but npm still
+// puts globals beside node, and a symlink in ~/.local/bin is enough to find it.
+func TestToolFindsAnNpmGlobalBesideNode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("FNM_DIR", filepath.Join(home, ".local", "share", "fnm"))
+	t.Setenv("NVM_DIR", filepath.Join(home, ".nvm"))
+	oldDirs := extraToolDirs
+	extraToolDirs = []string{t.TempDir()}
+	t.Cleanup(func() { extraToolDirs = oldDirs })
+
+	prefix := filepath.Join(home, ".local", "share", "node-v24.18.0", "installation", "bin")
+	must(t, os.MkdirAll(prefix, 0o755))
+	must(t, os.WriteFile(filepath.Join(prefix, "node"), []byte("#!/bin/sh\n"), 0o755))
+	must(t, os.WriteFile(filepath.Join(prefix, "paseo"), []byte("#!/bin/sh\n"), 0o755))
+
+	// paseo is only reachable through node's directory, and node only through
+	// the symlink: neither is on PATH.
+	localBin := filepath.Join(home, ".local", "bin")
+	must(t, os.MkdirAll(localBin, 0o755))
+	must(t, os.Symlink(filepath.Join(prefix, "node"), filepath.Join(localBin, "node")))
+
+	// node's directory is reached through EvalSymlinks, and on macOS a temp
+	// dir resolves under /private, so compare against the resolved prefix.
+	resolved, err := filepath.EvalSymlinks(prefix)
+	must(t, err)
+	path, ok := Tool("paseo")
+	if !ok || path != filepath.Join(resolved, "paseo") {
+		t.Fatalf("Tool(paseo) = %q, %v; want the copy beside node", path, ok)
+	}
+}
+
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
