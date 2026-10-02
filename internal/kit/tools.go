@@ -54,8 +54,18 @@ const marker = "# Written by calport for the Cal.com worktree kit."
 
 const herdrPluginID = "calport.cal-worktrees"
 
+// Paseo plugins carry the same id; the two never meet, since each tool reads
+// only its own plugin directory.
+const paseoPluginID = "calport.cal-worktrees"
+
 //go:embed herdr-plugin/hook
 var herdrHook []byte
+
+//go:embed paseo-plugin/index.server.ts
+var paseoServer []byte
+
+//go:embed paseo-plugin/paseo-plugin.json
+var paseoManifest []byte
 
 // repoTool is a tool configured by a file in the checkout.
 type repoTool struct {
@@ -107,7 +117,7 @@ func (in *Installer) Tools(ctx context.Context, root string, orca OrcaHooks) []T
 	for _, t := range repoTools {
 		out = append(out, in.repoToolStatus(ctx, root, t, orca))
 	}
-	out = append(out, in.herdrStatus(ctx))
+	out = append(out, in.herdrStatus(ctx), in.paseoStatus(ctx))
 	return append(out, skippedTools...)
 }
 
@@ -116,6 +126,9 @@ func (in *Installer) Tools(ctx context.Context, root string, orca OrcaHooks) []T
 func (in *Installer) RunsHooks(ctx context.Context, tool, root string) bool {
 	if tool == "herdr" {
 		return in.herdrStatus(ctx).State == ToolConfigured
+	}
+	if tool == "paseo" {
+		return in.paseoStatus(ctx).State == ToolConfigured
 	}
 	for _, t := range repoTools {
 		if t.id == tool {
@@ -178,6 +191,8 @@ func (in *Installer) SetUpTools(ctx context.Context, root string, names []string
 		var err error
 		if s.Tool == "herdr" {
 			err = in.setUpHerdr(ctx)
+		} else if s.Tool == "paseo" {
+			err = in.setUpPaseo(ctx)
 		} else {
 			err = in.writeRepoFile(ctx, root, s.Tool)
 		}
@@ -316,6 +331,59 @@ func (in *Installer) herdrStatus(ctx context.Context) ToolStatus {
 	}
 	s.State, s.Detail = ToolMissing, "Opt-in: installs a Herdr plugin for your user on this box, which runs the hooks for Herdr worktrees of this checkout."
 	return s
+}
+
+// PaseoPluginDir is where the kit's Paseo plugin lives. Like Herdr, Paseo has
+// no per-repository file: the plugin is installed into the daemon for this
+// user and decides per workspace whether the worktree is this checkout's.
+func (in *Installer) PaseoPluginDir() string { return filepath.Join(in.Dir(), "paseo-plugin") }
+
+func (in *Installer) paseoStatus(ctx context.Context) ToolStatus {
+	dir := in.PaseoPluginDir()
+	s := ToolStatus{Tool: "paseo", Name: "Paseo", File: dir, OptIn: true}
+	paseo := in.program("paseo")
+	if s.Installed = paseo != ""; !s.Installed {
+		s.State, s.Detail = ToolSkipped, "Paseo is not installed on this box."
+		return s
+	}
+	server, _ := os.ReadFile(filepath.Join(dir, "index.server.ts"))
+	manifest, _ := os.ReadFile(filepath.Join(dir, "paseo-plugin.json"))
+	if bytes.Equal(server, paseoServer) && bytes.Equal(manifest, paseoManifest) && paseoAdded(ctx, paseo) {
+		s.State, s.Detail = ToolConfigured, "A Paseo plugin for your user sets up Paseo workspaces of this checkout, and holds an agent until its worktree is ready."
+		return s
+	}
+	s.State, s.Detail = ToolMissing, "Opt-in: installs a Paseo plugin for your user on this box, which sets up Paseo workspaces of this checkout."
+	return s
+}
+
+func paseoAdded(ctx context.Context, paseo string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, paseo, "plugin", "list", "--json").Output()
+	return err == nil && bytes.Contains(out, []byte(`"`+paseoPluginID+`"`))
+}
+
+func (in *Installer) setUpPaseo(ctx context.Context) error {
+	dir := in.PaseoPluginDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := writeAtomic(filepath.Join(dir, "index.server.ts"), paseoServer, 0o644); err != nil {
+		return err
+	}
+	if err := writeAtomic(filepath.Join(dir, "paseo-plugin.json"), paseoManifest, 0o644); err != nil {
+		return err
+	}
+	paseo := in.program("paseo")
+	if paseoAdded(ctx, paseo) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, paseo, "plugin", "add", dir).CombinedOutput(); err != nil {
+		return fmt.Errorf("paseo plugin add: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func herdrLinked(ctx context.Context, herdr string) bool {

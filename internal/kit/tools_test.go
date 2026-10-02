@@ -293,3 +293,28 @@ func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// Paseo is opt-in and only offered where Paseo is installed, the same way Herdr
+// is. A box without it must report skipped rather than missing, so nobody is
+// told to set up a tool that is not there.
+func TestPaseoIsReportedPerBoxAndIsOptIn(t *testing.T) {
+	in, root := checkout(t)
+	var paseo *ToolStatus
+	for _, s := range in.Tools(context.Background(), root, OrcaHooks{}) {
+		if s.Tool == "paseo" {
+			paseo = &s
+		}
+	}
+	if paseo == nil {
+		t.Fatal("Tools() never reported paseo; it must appear beside the other worktree tools")
+	}
+	if !paseo.OptIn {
+		t.Fatal("paseo must be opt-in: installing a plugin into someone's daemon is not a default")
+	}
+	if paseo.Installed && paseo.State == ToolSkipped {
+		t.Fatal("paseo is installed here, so it must not be skipped")
+	}
+	if !paseo.Installed && paseo.State != ToolSkipped {
+		t.Fatalf("paseo is not installed, so state must be skipped, got %q", paseo.State)
+	}
+}

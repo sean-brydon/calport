@@ -1,0 +1,7 @@
+{
+  "id": "calport.cal-worktrees",
+  "description": "Gives each Cal.com worktree its own port, database and URL, and waits for them before an agent starts",
+  "requirements": {
+    "paseo": ">=0.8.0"
+  }
+}
