@@ -318,3 +318,101 @@ func TestPaseoIsReportedPerBoxAndIsOptIn(t *testing.T) {
 		t.Fatalf("paseo is not installed, so state must be skipped, got %q", paseo.State)
 	}
 }
+
+// fakePaseo plants a paseo the Installer will find, which answers
+// "plugin ls --json" with the kit's plugin in the given status.
+func fakePaseo(t *testing.T, in *Installer, status string) {
+	t.Helper()
+	must(t, os.MkdirAll(in.bin(), 0o755))
+	listing := mustJSON([]map[string]any{{"id": paseoPluginID, "enabled": true, "status": status}})
+	script := "#!/bin/sh\ncat <<'JSON'\n" + listing + "\nJSON\n"
+	must(t, os.WriteFile(filepath.Join(in.bin(), "paseo"), []byte(script), 0o755))
+
+	// The status check only runs once every installed file matches what we
+	// embed, so write the whole plugin out the way setup does.
+	dir := in.PaseoPluginDir()
+	for rel, content := range paseoPluginFiles() {
+		path := filepath.Join(dir, rel)
+		must(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		must(t, os.WriteFile(path, content, 0o644))
+	}
+}
+
+// Paseo reports a loaded plugin as "running". An earlier check looked for
+// "enabled", a status Paseo never emits, so a working plugin read as switched
+// off on every box.
+func TestPaseoIsConfiguredWhenTheDaemonHasLoadedThePlugin(t *testing.T) {
+	in, _ := checkout(t)
+	fakePaseo(t, in, "running")
+	s := in.paseoStatus(context.Background())
+	if s.State != ToolConfigured {
+		t.Fatalf("state = %q (%s), want configured: Paseo reports a loaded plugin as running", s.State, s.Detail)
+	}
+}
+
+// A daemon with plugins switched off keeps the plugin "disabled" however
+// correctly it is installed, so reporting it configured would promise hooks
+// that never run.
+func TestPaseoIsNotConfiguredWhileTheDaemonHasPluginsSwitchedOff(t *testing.T) {
+	in, _ := checkout(t)
+	fakePaseo(t, in, "disabled")
+	s := in.paseoStatus(context.Background())
+	if s.State != ToolMissing {
+		t.Fatalf("state = %q, want missing while plugins are switched off", s.State)
+	}
+	if !strings.Contains(s.Detail, "pluginsEnabled") {
+		t.Fatalf("detail = %q; it must say how to switch plugins on", s.Detail)
+	}
+}
+
+// The plugin is a directory of files that have to agree with each other, so a
+// single stale one makes the install wrong - and has to read as not set up,
+// or nobody is ever told to run --setup again.
+func TestPaseoIsNotConfiguredWhenAnyShippedFileIsStale(t *testing.T) {
+	in, _ := checkout(t)
+	fakePaseo(t, in, "running")
+	if s := in.paseoStatus(context.Background()); s.State != ToolConfigured {
+		t.Fatalf("state = %q before editing a file, want configured", s.State)
+	}
+
+	stale := filepath.Join(in.PaseoPluginDir(), "shared", "worktree.ts")
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("the plugin must ship %s: %v", stale, err)
+	}
+	must(t, os.WriteFile(stale, []byte("// an older calport wrote this\n"), 0o644))
+
+	if s := in.paseoStatus(context.Background()); s.State != ToolMissing {
+		t.Fatalf("state = %q with a stale shipped file, want missing", s.State)
+	}
+}
+
+// The panel is the user-facing half of the plugin, so it has to actually be
+// shipped: embedding only the server entry would install a plugin with no UI.
+func TestPaseoPluginShipsItsClientEntryAndPanel(t *testing.T) {
+	files := paseoPluginFiles()
+	for _, want := range []string{
+		"paseo-plugin.json",
+		"package.json",
+		"tsconfig.json",
+		"index.server.ts",
+		"index.client.tsx",
+		filepath.Join("client", "worktree-panel.tsx"),
+		filepath.Join("client", "boxes-surface.tsx"),
+		filepath.Join("server", "worktree.ts"),
+		filepath.Join("server", "worktree-identity.ts"),
+		filepath.Join("server", "boxes.ts"),
+		filepath.Join("shared", "worktree.ts"),
+		filepath.Join("shared", "boxes.ts"),
+	} {
+		if len(files[want]) == 0 {
+			t.Errorf("the plugin does not ship %s", want)
+		}
+	}
+	// node_modules is for typechecking here, and embedding it would add
+	// thousands of files to every calportd.
+	for rel := range files {
+		if strings.HasPrefix(rel, "node_modules") {
+			t.Errorf("the plugin must not ship %s", rel)
+		}
+	}
+}

@@ -3,16 +3,19 @@ package kit
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/sean-brydon/calport/internal/doctor"
 )
 
 // Worktree tools read these files from a checkout to run hooks for the
@@ -62,11 +65,56 @@ const paseoPluginID = "calport-cal-worktrees"
 //go:embed herdr-plugin/hook
 var herdrHook []byte
 
-//go:embed paseo-plugin/index.server.ts
-var paseoServer []byte
+// Every path is listed, rather than embedding the directory, because an
+// embedded directory would swallow node_modules: the plugin keeps dev
+// dependencies so it can be typechecked, and Paseo supplies the runtime
+// modules itself.
+//
+//go:embed paseo-plugin/paseo-plugin.json paseo-plugin/package.json paseo-plugin/tsconfig.json
+//go:embed paseo-plugin/index.server.ts paseo-plugin/index.client.tsx
+//go:embed paseo-plugin/client paseo-plugin/server paseo-plugin/shared
+var paseoPluginFS embed.FS
 
-//go:embed paseo-plugin/paseo-plugin.json
-var paseoManifest []byte
+// paseoPluginFiles is the plugin as calport ships it, keyed by path relative
+// to the plugin directory.
+func paseoPluginFiles() map[string][]byte {
+	files := map[string][]byte{}
+	root := "paseo-plugin"
+	err := fs.WalkDir(paseoPluginFS, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := paseoPluginFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		files[rel] = b
+		return nil
+	})
+	if err != nil {
+		// The files are embedded at build time, so a walk over them cannot
+		// fail in a built binary.
+		panic("kit: reading the embedded Paseo plugin: " + err.Error())
+	}
+	return files
+}
+
+// paseoPluginWritten reports whether dir holds exactly the plugin this calport
+// ships. A plugin is a directory of files that have to agree with each other,
+// so one stale file is as much a mismatch as a missing one.
+func paseoPluginWritten(dir string) bool {
+	for rel, want := range paseoPluginFiles() {
+		got, err := os.ReadFile(filepath.Join(dir, rel))
+		if err != nil || !bytes.Equal(got, want) {
+			return false
+		}
+	}
+	return true
+}
 
 // repoTool is a tool configured by a file in the checkout.
 type repoTool struct {
@@ -292,12 +340,15 @@ func (in *Installer) installed(programs, dirs []string) bool {
 	return false
 }
 
+// program finds a tool the kit drives: the kit's own copy first, then
+// anywhere doctor looks, which covers the Node version manager directories an
+// npm global like Paseo lives in and calportd's own PATH does not have.
 func (in *Installer) program(name string) string {
 	p := filepath.Join(in.bin(), name)
 	if st, err := os.Stat(p); err == nil && !st.IsDir() {
 		return p
 	}
-	p, _ = exec.LookPath(name)
+	p, _ = doctor.Tool(name)
 	return p
 }
 
@@ -347,16 +398,15 @@ func (in *Installer) paseoStatus(ctx context.Context) ToolStatus {
 		s.State, s.Detail = ToolSkipped, "Paseo is not installed on this box."
 		return s
 	}
-	server, _ := os.ReadFile(filepath.Join(dir, "index.server.ts"))
-	manifest, _ := os.ReadFile(filepath.Join(dir, "paseo-plugin.json"))
 	plugin, installed := paseoInstalled(ctx, paseo)
-	if bytes.Equal(server, paseoServer) && bytes.Equal(manifest, paseoManifest) && installed {
-		// Installed and enabled, but the daemon loaded nothing: Paseo has
-		// plugins switched off, and saying "configured" here would promise
-		// hooks that never run.
-		if plugin.Enabled && plugin.Status != "enabled" {
+	if paseoPluginWritten(dir) && installed {
+		// Installed and asked for, but the daemon has not loaded it: Paseo
+		// has plugins switched off, and saying "configured" here would
+		// promise hooks that never run. Paseo reports a loaded plugin as
+		// "running", and one held back by that switch as "disabled".
+		if plugin.Enabled && plugin.Status == "disabled" {
 			s.State = ToolMissing
-			s.Detail = "Installed, but this Paseo has plugins switched off, so its hooks never run. Turn them on in Paseo's settings."
+			s.Detail = "Installed, but this Paseo has plugins switched off, so its hooks never run. Switch them on: paseo daemon config set pluginsEnabled true, then paseo daemon restart."
 			return s
 		}
 		s.State, s.Detail = ToolConfigured, "A Paseo plugin for your user sets up Paseo workspaces of this checkout, and holds an agent until its worktree is ready."
@@ -376,13 +426,28 @@ type paseoPlugin struct {
 	Status  string `json:"status"`
 }
 
+// toolCmd runs a tool program resolves, with the tool's own directory ahead of
+// PATH. An npm global is a script starting "#!/usr/bin/env node", so it runs
+// only when the Node it was installed under is on PATH - and under a version
+// manager that Node sits in the same directory as the tool itself. calportd's
+// PATH has neither.
+func toolCmd(ctx context.Context, program string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, program, args...)
+	path := filepath.Dir(program)
+	if existing := os.Getenv("PATH"); existing != "" {
+		path += string(os.PathListSeparator) + existing
+	}
+	cmd.Env = append(os.Environ(), "PATH="+path)
+	return cmd
+}
+
 // paseoInstalled asks Paseo, rather than trusting the files on disk: a plugin
 // directory can be written and never installed. The subcommand is ls - add is
 // an alias of install, and there is no list.
 func paseoInstalled(ctx context.Context, paseo string) (paseoPlugin, bool) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, paseo, "plugin", "ls", "--json").Output()
+	out, err := toolCmd(ctx, paseo, "plugin", "ls", "--json").Output()
 	if err != nil {
 		return paseoPlugin{}, false
 	}
@@ -403,11 +468,14 @@ func (in *Installer) setUpPaseo(ctx context.Context) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(dir, "index.server.ts"), paseoServer, 0o644); err != nil {
-		return err
-	}
-	if err := writeAtomic(filepath.Join(dir, "paseo-plugin.json"), paseoManifest, 0o644); err != nil {
-		return err
+	for rel, content := range paseoPluginFiles() {
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return err
+		}
+		if err := writeAtomic(path, content, 0o644); err != nil {
+			return err
+		}
 	}
 	paseo := in.program("paseo")
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -415,12 +483,12 @@ func (in *Installer) setUpPaseo(ctx context.Context) error {
 	// add refuses an id it already has, so a plugin whose files this calport
 	// just rewrote is reloaded rather than installed again.
 	if _, installed := paseoInstalled(ctx, paseo); installed {
-		if out, err := exec.CommandContext(ctx, paseo, "plugin", "reload", paseoPluginID).CombinedOutput(); err != nil {
+		if out, err := toolCmd(ctx, paseo, "plugin", "reload", paseoPluginID).CombinedOutput(); err != nil {
 			return fmt.Errorf("paseo plugin reload: %s", strings.TrimSpace(string(out)))
 		}
 		return nil
 	}
-	if out, err := exec.CommandContext(ctx, paseo, "plugin", "add", dir).CombinedOutput(); err != nil {
+	if out, err := toolCmd(ctx, paseo, "plugin", "add", dir).CombinedOutput(); err != nil {
 		return fmt.Errorf("paseo plugin add: %s", strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -429,7 +497,7 @@ func (in *Installer) setUpPaseo(ctx context.Context) error {
 func herdrLinked(ctx context.Context, herdr string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, herdr, "plugin", "list", "--json").Output()
+	out, err := toolCmd(ctx, herdr, "plugin", "list", "--json").Output()
 	return err == nil && bytes.Contains(out, []byte(`"`+herdrPluginID+`"`))
 }
 
@@ -450,7 +518,7 @@ func (in *Installer) setUpHerdr(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, herdr, "plugin", "link", dir, "--enabled").CombinedOutput(); err != nil {
+	if out, err := toolCmd(ctx, herdr, "plugin", "link", dir, "--enabled").CombinedOutput(); err != nil {
 		return fmt.Errorf("herdr plugin link: %s", strings.TrimSpace(string(out)))
 	}
 	return nil
