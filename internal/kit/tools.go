@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -54,9 +55,9 @@ const marker = "# Written by calport for the Cal.com worktree kit."
 
 const herdrPluginID = "calport.cal-worktrees"
 
-// Paseo plugins carry the same id; the two never meet, since each tool reads
-// only its own plugin directory.
-const paseoPluginID = "calport.cal-worktrees"
+// Paseo rejects an id with a dot: ids are ^[a-z][a-z0-9-]*$, so this cannot be
+// Herdr's id even though it is the same plugin in spirit.
+const paseoPluginID = "calport-cal-worktrees"
 
 //go:embed herdr-plugin/hook
 var herdrHook []byte
@@ -348,7 +349,16 @@ func (in *Installer) paseoStatus(ctx context.Context) ToolStatus {
 	}
 	server, _ := os.ReadFile(filepath.Join(dir, "index.server.ts"))
 	manifest, _ := os.ReadFile(filepath.Join(dir, "paseo-plugin.json"))
-	if bytes.Equal(server, paseoServer) && bytes.Equal(manifest, paseoManifest) && paseoAdded(ctx, paseo) {
+	plugin, installed := paseoInstalled(ctx, paseo)
+	if bytes.Equal(server, paseoServer) && bytes.Equal(manifest, paseoManifest) && installed {
+		// Installed and enabled, but the daemon loaded nothing: Paseo has
+		// plugins switched off, and saying "configured" here would promise
+		// hooks that never run.
+		if plugin.Enabled && plugin.Status != "enabled" {
+			s.State = ToolMissing
+			s.Detail = "Installed, but this Paseo has plugins switched off, so its hooks never run. Turn them on in Paseo's settings."
+			return s
+		}
 		s.State, s.Detail = ToolConfigured, "A Paseo plugin for your user sets up Paseo workspaces of this checkout, and holds an agent until its worktree is ready."
 		return s
 	}
@@ -356,11 +366,36 @@ func (in *Installer) paseoStatus(ctx context.Context) ToolStatus {
 	return s
 }
 
-func paseoAdded(ctx context.Context, paseo string) bool {
+// paseoPlugin is what Paseo reports about the kit's plugin. status is what the
+// daemon has loaded; enabled is what the configuration asks for. They differ
+// when the daemon has plugins switched off, and then nothing runs however
+// correctly the plugin is installed.
+type paseoPlugin struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+	Status  string `json:"status"`
+}
+
+// paseoInstalled asks Paseo, rather than trusting the files on disk: a plugin
+// directory can be written and never installed. The subcommand is ls - add is
+// an alias of install, and there is no list.
+func paseoInstalled(ctx context.Context, paseo string) (paseoPlugin, bool) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, paseo, "plugin", "list", "--json").Output()
-	return err == nil && bytes.Contains(out, []byte(`"`+paseoPluginID+`"`))
+	out, err := exec.CommandContext(ctx, paseo, "plugin", "ls", "--json").Output()
+	if err != nil {
+		return paseoPlugin{}, false
+	}
+	var all []paseoPlugin
+	if json.Unmarshal(out, &all) != nil {
+		return paseoPlugin{}, false
+	}
+	for _, p := range all {
+		if p.ID == paseoPluginID {
+			return p, true
+		}
+	}
+	return paseoPlugin{}, false
 }
 
 func (in *Installer) setUpPaseo(ctx context.Context) error {
@@ -375,11 +410,16 @@ func (in *Installer) setUpPaseo(ctx context.Context) error {
 		return err
 	}
 	paseo := in.program("paseo")
-	if paseoAdded(ctx, paseo) {
-		return nil
-	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+	// add refuses an id it already has, so a plugin whose files this calport
+	// just rewrote is reloaded rather than installed again.
+	if _, installed := paseoInstalled(ctx, paseo); installed {
+		if out, err := exec.CommandContext(ctx, paseo, "plugin", "reload", paseoPluginID).CombinedOutput(); err != nil {
+			return fmt.Errorf("paseo plugin reload: %s", strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
 	if out, err := exec.CommandContext(ctx, paseo, "plugin", "add", dir).CombinedOutput(); err != nil {
 		return fmt.Errorf("paseo plugin add: %s", strings.TrimSpace(string(out)))
 	}
