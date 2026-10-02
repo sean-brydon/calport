@@ -1,10 +1,16 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+
+import { readBoxesStats } from "./server/boxes";
+import { type Setup, readWorktreeInfo } from "./server/worktree";
+import { isKitArchive, isKitWorktree } from "./server/worktree-identity";
+import { boxesStats } from "./shared/boxes";
+import { worktreeInfo } from "./shared/worktree";
 
 const run = promisify(execFile);
 const home = homedir();
@@ -24,6 +30,18 @@ const KIT_CONFIG = join(home, ".local/share/cal-worktrees/config.json");
 // delaying workspace creation itself.
 const setups = new Map<string, Promise<Record<string, string>>>();
 
+// outcomes is what the workspace panel reads. A promise cannot be asked
+// whether it is still pending, and the panel has to distinguish "still being
+// made" from "made" from "failed, which is why there is no port here".
+const outcomes = new Map<string, Setup>();
+
+// message is what the panel shows when setup fails, so it has to survive
+// anything a rejected exec can carry.
+function message(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
 async function kitRoot(): Promise<string | undefined> {
   try {
     return JSON.parse(await readFile(KIT_CONFIG, "utf8")).root;
@@ -31,23 +49,6 @@ async function kitRoot(): Promise<string | undefined> {
     // No kit on this machine: every hook below becomes a no-op.
     return undefined;
   }
-}
-
-// gitCommonDir identifies the repository a path belongs to, so a worktree of
-// some other checkout is left alone. Paseo runs these hooks for every project.
-async function gitCommonDir(cwd: string): Promise<string | undefined> {
-  try {
-    const { stdout } = await run("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
-    return resolve(stdout.trim());
-  } catch {
-    return undefined;
-  }
-}
-
-async function isKitWorktree(cwd: string, root: string): Promise<boolean> {
-  if (resolve(cwd) === resolve(root)) return false; // the checkout itself, not a worktree of it
-  const [a, b] = await Promise.all([gitCommonDir(cwd), gitCommonDir(root)]);
-  return Boolean(a && b && a === b);
 }
 
 // setup gives the worktree its port, database and URL, and reports the
@@ -64,7 +65,14 @@ export default function contribute(server: PluginServerContext) {
     if (!root || !(await isKitWorktree(event.workspace.cwd, root))) return;
     const name = event.workspace.name ?? "";
     // Started here, awaited in session_open: creation stays fast, startup waits.
-    setups.set(event.workspace.cwd, setup(event.workspace.cwd, root, name));
+    const cwd = event.workspace.cwd;
+    outcomes.set(cwd, { state: "pending" });
+    const pending = setup(cwd, root, name);
+    setups.set(cwd, pending);
+    pending.then(
+      () => outcomes.set(cwd, { state: "ready" }),
+      (err) => outcomes.set(cwd, { state: "failed", detail: message(err) }),
+    );
   });
 
   server.before("agent.session_open", async ({ request }) => {
@@ -82,17 +90,24 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.on("workspace.archived", async (event) => {
+    const cwd = event.workspace.cwd;
+    // Whether we set this one up has to be read before the record is dropped.
+    const ours = outcomes.has(cwd);
+    setups.delete(cwd);
+    outcomes.delete(cwd);
     const root = await kitRoot();
-    setups.delete(event.workspace.cwd);
-    // The directory may still exist here - the reference warns that archive
-    // events can precede worktree cleanup - which is what we want: the port and
-    // database are released while the worktree is still identifiable.
-    if (!root || !(await isKitWorktree(event.workspace.cwd, root))) return;
-    const env = { ...process.env, ORCA_ROOT_PATH: root, ORCA_WORKTREE_PATH: event.workspace.cwd };
+    if (!root || !(await isKitArchive(cwd, root, ours))) return;
+    const env = { ...process.env, ORCA_ROOT_PATH: root, ORCA_WORKTREE_PATH: cwd };
     await run(join(home, ".local/bin/cal-archive"), [], { cwd: home, env }).catch((err) => {
-      console.error(`cal.com kit archive failed for ${event.workspace.cwd}:`, err);
+      console.error(`cal.com kit archive failed for ${cwd}:`, err);
     });
   });
 
-  return () => setups.clear();
+  server.handle(boxesStats, () => readBoxesStats());
+  server.handle(worktreeInfo, (input) => readWorktreeInfo(input, outcomes.get(input.directory)));
+
+  return () => {
+    setups.clear();
+    outcomes.clear();
+  };
 }
