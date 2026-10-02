@@ -567,6 +567,27 @@ func sessions(ctx context.Context, c *box.Client, args []string, out io.Writer) 
 	})
 }
 
+// shellCommand joins argv into one line that a shell splits back into the same
+// argv. The box runs a session's command through a login shell, so anything the
+// shell reads as syntax - spaces, quotes, redirections - has to be quoted here,
+// or an argument like "echo one two" arrives as three.
+func shellCommand(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, a := range argv {
+		quoted[i] = shellQuote(a)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// shellQuote leaves a plain word alone, so a command listed by session ls still
+// reads as the one that was typed.
+func shellQuote(s string) string {
+	if s != "" && !strings.ContainsAny(s, " \t\n\r'\"\\$`&|;<>()*?[]{}#~!") {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func sessionNew(ctx context.Context, c *box.Client, args []string, out io.Writer) error {
 	var command []string
 	for i, a := range args {
@@ -582,7 +603,7 @@ func sessionNew(ctx context.Context, c *box.Client, args []string, out io.Writer
 	if err != nil || len(pos) != 1 {
 		return usageErr("session new LOC[/WORKTREE] [--name N] [-- COMMAND...]")
 	}
-	sess, err := c.AddSession(ctx, *name, pos[0], strings.Join(command, " "))
+	sess, err := c.AddSession(ctx, *name, pos[0], shellCommand(command))
 	if err != nil {
 		return err
 	}

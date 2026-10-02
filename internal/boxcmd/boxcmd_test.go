@@ -126,3 +126,20 @@ func TestUnitAddSendsTheCommandAfterDoubleDash(t *testing.T) {
 		t.Fatalf("args = %v; want [serve]", rec.body["args"])
 	}
 }
+
+func TestShellCommand(t *testing.T) {
+	for _, c := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"claude", "--resume"}, "claude --resume"},
+		{[]string{"sh", "-lc", "echo one two"}, `sh -lc 'echo one two'`},
+		{[]string{"sh", "-c", `printf "[%s]\n" "$@"`}, `sh -c 'printf "[%s]\n" "$@"'`},
+		{[]string{"sh", "-c", "it's"}, `sh -c 'it'\''s'`},
+		{nil, ""},
+	} {
+		if got := shellCommand(c.argv); got != c.want {
+			t.Errorf("shellCommand(%q) = %q, want %q", c.argv, got, c.want)
+		}
+	}
+}
