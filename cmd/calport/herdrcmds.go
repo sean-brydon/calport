@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"text/tabwriter"
 
 	"github.com/sean-brydon/calport/internal/agent"
@@ -19,7 +20,7 @@ const herdrUsage = `Usage:
   calport herdr [status] [--json]        Which boxes are in this computer's Herdr, and what is in the way
   calport herdr setup [BOX...] [--json]  Add boxes (default: every one that is ready) to this computer's Herdr
   calport herdr update BOX [--json]      Update Herdr on a box; refuses while an agent runs in it
-  calport herdr open                     Open Herdr in a terminal: this computer and every added box
+  calport herdr open                     Run Herdr here: this computer and every added box
 
 Herdr reaches other machines over SSH. setup writes an SSH host per box,
 calport-BOX, that travels over calport's own network, and includes them from
@@ -110,7 +111,11 @@ func herdrCommand(l laptop, args []string) error {
 		if err != nil {
 			return err
 		}
-		return openTerminalRunning(shellQuote(cli.Path))
+		// Replace this process rather than opening another window: herdr is a
+		// terminal program, and the terminal someone typed this in is the one
+		// they meant. Opening a second one leaves them looking at the wrong
+		// window, with their shell's directory and environment left behind.
+		return syscall.Exec(cli.Path, []string{cli.Path}, os.Environ())
 	}
 	return fmt.Errorf("unknown herdr action %q; run calport herdr help", action)
 }
